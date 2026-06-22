@@ -44,6 +44,11 @@ class _FoodShellState extends ConsumerState<FoodShell>
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    // Allow external deep-links (e.g. the Stats nutrition card) to drive the
+    // visible sub-tab even when the shell is already alive in the IndexedStack.
+    ref.listen<FoodSubTab>(foodSubTabProvider, (_, next) {
+      if (_tab.index != next.index) _tab.animateTo(next.index);
+    });
     return Scaffold(
       backgroundColor: c.background,
       body: SafeArea(

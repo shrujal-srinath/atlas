@@ -4,11 +4,11 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/models.dart';
-import '../data/off_client.dart';
+import '../providers/food_providers.dart';
 import 'food_detail_screen.dart';
 
-/// Full-screen barcode scanner. Detects a code → looks it up on Open Food
-/// Facts → pushes to FoodDetailScreen if found.
+/// Full-screen barcode scanner. Detects a code → resolves it (catalog cache
+/// first, then Open Food Facts, caching the hit) → pushes to FoodDetailScreen.
 class BarcodeScannerScreen extends ConsumerStatefulWidget {
   final MealTimeSlot slot;
   final DateTime date;
@@ -61,8 +61,7 @@ class _BarcodeScannerScreenState extends ConsumerState<BarcodeScannerScreen>
       _lastCode = code;
     });
 
-    final off = OffClient();
-    final food = await off.byBarcode(code);
+    final food = await ref.read(foodRepositoryProvider).foodByBarcode(code);
 
     if (!mounted) return;
 

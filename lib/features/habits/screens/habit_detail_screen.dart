@@ -4,10 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/atlas_controls.dart';
+import '../../../core/utils/error_messages.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../core/utils/streak_engine.dart';
 import '../../../shared/models/models.dart';
 import '../../../shared/services/notification_service.dart';
+import '../../food/domain/meal_entry.dart'; // MealTimeSlotX.label
+import '../models/habit_food_link.dart';
 import '../providers/habit_provider.dart';
 
 /// Per-habit detail: stats, schedule summary, edit/archive/delete actions.
@@ -43,7 +47,7 @@ class HabitDetailScreen extends ConsumerWidget {
         loading: () => Center(
             child: CircularProgressIndicator(color: c.accent, strokeWidth: 2)),
         error: (e, _) => Center(
-          child: Text(e.toString(),
+          child: Text(friendlyError(e),
               style: TextStyle(color: c.negative, fontSize: 13)),
         ),
       ),
@@ -59,12 +63,7 @@ class _Body extends ConsumerWidget {
     if (habit.colorKey != null && kHabitColorSwatch[habit.colorKey] != null) {
       return Color(kHabitColorSwatch[habit.colorKey]!);
     }
-    final c = context.c;
-    return switch (habit.section) {
-      HabitSection.athletic => c.athletic,
-      HabitSection.body => c.body,
-      HabitSection.mind => c.mind,
-    };
+    return habit.section.color(context.c);
   }
 
   ({int current, int best, double rate30d, double trendDelta, double health})
@@ -248,6 +247,16 @@ class _Body extends ConsumerWidget {
             ),
           ],
         ),
+        const SizedBox(height: 12),
+
+        // Deep-dive into this task's history (week/month/year, charts, calendar).
+        AtlasButton(
+          label: 'Full stats',
+          icon: LucideIcons.barChart2,
+          variant: AtlasButtonVariant.secondary,
+          height: 50,
+          onPressed: () => context.push('/habit/${habit.id}/stats'),
+        ),
         const SizedBox(height: 16),
 
         // 7-day mini heatmap
@@ -276,49 +285,36 @@ class _Body extends ConsumerWidget {
             ),
           ]),
 
+        // Food link summary — what completing this auto-logs.
+        if (HabitFoodLink.fromRaw(habit.foodLinkRaw) case final link?) ...[
+          const SizedBox(height: 12),
+          _FoodLinkCard(link: link, accent: accent),
+        ],
+
         const SizedBox(height: 20),
 
         // Actions
         Row(
           children: [
             Expanded(
-              child: OutlinedButton.icon(
-                icon: Icon(LucideIcons.pencil, size: 16, color: c.textPrimary),
-                label: Text(
-                  'Edit',
-                  style: TextStyle(
-                    fontFamily: 'Inter',
-                    fontWeight: FontWeight.w600,
-                    color: c.textPrimary,
-                  ),
-                ),
-                onPressed: () =>
-                    context.push('/habit-creation', extra: habit),
-                style: OutlinedButton.styleFrom(
-                  side: BorderSide(color: c.border),
-                  padding: const EdgeInsets.symmetric(vertical: 13),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppRadii.button),
-                  ),
-                ),
+              child: AtlasButton(
+                label: 'Edit',
+                icon: LucideIcons.pencil,
+                variant: AtlasButtonVariant.secondary,
+                height: 50,
+                onPressed: () => context.push('/habit-creation', extra: habit),
               ),
             ),
             const SizedBox(width: 10),
             Expanded(
-              child: OutlinedButton.icon(
-                icon: Icon(
-                  habit.isArchived ? LucideIcons.refreshCw : LucideIcons.archive,
-                  size: 16,
-                  color: c.amber,
-                ),
-                label: Text(
-                  habit.isArchived ? 'Restore' : 'Archive',
-                  style: TextStyle(
-                    fontFamily: 'Inter',
-                    fontWeight: FontWeight.w600,
-                    color: c.amber,
-                  ),
-                ),
+              child: AtlasButton(
+                label: habit.isArchived ? 'Restore' : 'Archive',
+                icon: habit.isArchived
+                    ? LucideIcons.refreshCw
+                    : LucideIcons.archive,
+                variant: AtlasButtonVariant.tonal,
+                color: c.amber,
+                height: 50,
                 onPressed: () async {
                   HapticFeedback.mediumImpact();
                   if (habit.isArchived) {
@@ -333,13 +329,6 @@ class _Body extends ConsumerWidget {
                   }
                   if (context.mounted) context.pop();
                 },
-                style: OutlinedButton.styleFrom(
-                  side: BorderSide(color: c.amber.withValues(alpha: 0.4)),
-                  padding: const EdgeInsets.symmetric(vertical: 13),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppRadii.button),
-                  ),
-                ),
               ),
             ),
           ],
@@ -772,6 +761,66 @@ class _HealthCard extends StatelessWidget {
               valueColor: AlwaysStoppedAnimation(band),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Summary of the foods a task auto-logs when completed.
+class _FoodLinkCard extends StatelessWidget {
+  final HabitFoodLink link;
+  final Color accent;
+  const _FoodLinkCard({required this.link, required this.accent});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final t = context.t;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        border: Border.all(color: c.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(LucideIcons.utensils, size: 14, color: accent),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Auto-logs to ${link.slot.label}',
+                  style: t.body.copyWith(color: c.textSecondary),
+                ),
+              ),
+              Text('${link.totalKcal.round()} kcal', style: t.bodyStrong),
+            ],
+          ),
+          for (final item in link.items) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const SizedBox(width: 24),
+                Expanded(
+                  child: Text(
+                    item.name,
+                    style: t.body,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '${item.portionLabel} · ${item.totals.kcal.round()} kcal',
+                  style: t.meta.copyWith(color: c.textMuted),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );

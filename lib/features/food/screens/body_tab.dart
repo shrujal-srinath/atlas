@@ -5,8 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/app_snackbar.dart';
+import '../../../shared/widgets/atlas_controls.dart';
 import '../domain/weight_entry.dart';
 import '../providers/weight_providers.dart';
+import '../../../shared/widgets/atlas_error.dart';
+import '../../../shared/widgets/atlas_skeleton.dart';
 
 /// Body sub-tab: current weight + 7/30-day deltas, line chart, measurement list.
 class BodyTab extends ConsumerWidget {
@@ -21,11 +25,24 @@ class BodyTab extends ConsumerWidget {
     return Scaffold(
       backgroundColor: c.background,
       body: weightsAsync.when(
-        loading: () =>
-            const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-        error: (e, _) => Center(
-          child: Text('Failed to load body data: $e',
-              style: context.t.body.copyWith(color: c.negative)),
+        loading: () => Padding(
+          padding: const EdgeInsets.fromLTRB(
+              AppSpace.screenH, 14, AppSpace.screenH, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: const [
+              AtlasSkeleton.card(cardHeight: 150),
+              SizedBox(height: 12),
+              AtlasSkeleton.card(cardHeight: 200),
+              SizedBox(height: 12),
+              AtlasSkeleton.card(cardHeight: 220),
+            ],
+          ),
+        ),
+        error: (e, _) => AtlasError(
+          error: e,
+          title: 'Couldn\'t load body data',
+          onRetry: () => ref.invalidate(weightLogProvider),
         ),
         data: (logs) {
           return ListView(
@@ -45,15 +62,19 @@ class BodyTab extends ConsumerWidget {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: c.accent,
-        foregroundColor: c.onAccent,
-        heroTag: 'logWeight',
-        onPressed: () => _openAddWeight(context, ref),
-        icon: const Icon(LucideIcons.scale, size: 18),
-        label: const Text('Log weight',
-            style:
-                TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600)),
+      // Lift above the floating pill nav (~70px) so it never sits behind it.
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 72),
+        child: FloatingActionButton.extended(
+          backgroundColor: c.accent,
+          foregroundColor: c.onAccent,
+          heroTag: 'logWeight',
+          onPressed: () => _openAddWeight(context, ref),
+          icon: const Icon(LucideIcons.scale, size: 18),
+          label: const Text('Log weight',
+              style:
+                  TextStyle(fontFamily: 'Inter', fontWeight: FontWeight.w600)),
+        ),
       ),
     );
   }
@@ -92,6 +113,7 @@ class _CurrentWeightCard extends ConsumerWidget {
         color: c.surface,
         borderRadius: BorderRadius.circular(AppRadii.card),
         border: Border.all(color: c.border, width: 0.5),
+        boxShadow: AppShadows.card,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -200,7 +222,8 @@ class _WeightChartCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: c.surface,
           borderRadius: BorderRadius.circular(AppRadii.card),
-          border: Border.all(color: c.border),
+          border: Border.all(color: c.border, width: 0.5),
+          boxShadow: AppShadows.card,
         ),
         alignment: Alignment.center,
         child: Text('No weight history yet — log to start the chart.',
@@ -223,7 +246,8 @@ class _WeightChartCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: c.surface,
         borderRadius: BorderRadius.circular(AppRadii.card),
-        border: Border.all(color: c.border),
+        border: Border.all(color: c.border, width: 0.5),
+        boxShadow: AppShadows.card,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -305,7 +329,8 @@ class _MeasurementsCard extends ConsumerWidget {
       decoration: BoxDecoration(
         color: c.surface,
         borderRadius: BorderRadius.circular(AppRadii.card),
-        border: Border.all(color: c.border),
+        border: Border.all(color: c.border, width: 0.5),
+        boxShadow: AppShadows.card,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -450,32 +475,26 @@ class _AddWeightSheetState extends ConsumerState<_AddWeightSheet> {
         children: [
           Text('Log weight',
               style: context.t.h2.copyWith(color: c.textPrimary)),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _kg,
-            autofocus: true,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: const InputDecoration(
-              labelText: 'Weight',
-              suffixText: 'kg',
-            ),
-          ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _note,
-            decoration: const InputDecoration(
-              labelText: 'Note (optional)',
-              hintText: 'e.g. post-shower fasted',
-            ),
-          ),
           const SizedBox(height: 16),
-          FilledButton(
-            onPressed: _saving ? null : _save,
-            child: _saving
-                ? const SizedBox(
-                    width: 18, height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2))
-                : const Text('Save'),
+          AtlasField(
+            controller: _kg,
+            label: 'Weight',
+            suffix: 'kg',
+            hint: '74',
+            numeric: true,
+            autofocus: true,
+          ),
+          const SizedBox(height: 12),
+          AtlasField(
+            controller: _note,
+            label: 'Note (optional)',
+            hint: 'e.g. post-shower fasted',
+          ),
+          const SizedBox(height: 18),
+          AtlasButton(
+            label: 'Save',
+            loading: _saving,
+            onPressed: _save,
           ),
         ],
       ),
@@ -501,9 +520,7 @@ class _AddWeightSheetState extends ConsumerState<_AddWeightSheet> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed: $e')),
-      );
+      showErrorSnack(context, e);
     }
   }
 }

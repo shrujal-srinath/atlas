@@ -1,3 +1,4 @@
+import '../../../shared/services/offline_writer.dart';
 import '../../../shared/services/supabase_service.dart';
 import '../domain/weight_entry.dart';
 
@@ -30,16 +31,15 @@ class WeightRepository {
       date: DateTime(d.year, d.month, d.day),
       kg: kg, note: note,
     );
-    final inserted = await SupabaseService.client
-        .from('body_weight_logs')
-        .insert(entry.toInsert())
-        .select()
-        .single();
+    final inserted = await OfflineWriter.insert(
+      table: 'body_weight_logs',
+      payload: entry.toInsert(),
+    );
     return WeightEntry.fromJson(inserted);
   }
 
   Future<void> delete(String id) async {
-    await SupabaseService.client.from('body_weight_logs').delete().eq('id', id);
+    await OfflineWriter.delete(table: 'body_weight_logs', id: id);
   }
 
   Future<List<MeasurementEntry>> latestMeasurements() async {
@@ -69,11 +69,10 @@ class WeightRepository {
       date: DateTime(d.year, d.month, d.day),
       kind: kind, cm: cm,
     );
-    final inserted = await SupabaseService.client
-        .from('measurements')
-        .insert(entry.toInsert())
-        .select()
-        .single();
+    final inserted = await OfflineWriter.insert(
+      table: 'measurements',
+      payload: entry.toInsert(),
+    );
     return MeasurementEntry.fromJson(inserted);
   }
 }

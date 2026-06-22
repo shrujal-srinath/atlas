@@ -94,6 +94,27 @@ class LevelPrereq {
   double get ratioThreshold =>
       (config['ratioThreshold'] as num?)?.toDouble() ?? 0.80;
 
+  /// Optional timeframe: a goal to finish within [windowDays] of [startedAt].
+  /// When null the milestone has no deadline (lifetime/current count).
+  int? get windowDays => (config['windowDays'] as num?)?.toInt();
+
+  /// When the timeframe clock started (set the moment the milestone is created).
+  DateTime? get startedAt {
+    final v = config['startedAt'];
+    if (v is String) return DateTime.tryParse(v)?.toLocal();
+    return null;
+  }
+
+  bool get hasWindow => windowDays != null && startedAt != null;
+
+  /// End of the timeframe window, if one is set.
+  DateTime? get deadline {
+    final s = startedAt;
+    final w = windowDays;
+    if (s == null || w == null) return null;
+    return DateTime(s.year, s.month, s.day).add(Duration(days: w));
+  }
+
   /// Numeric target this pre-req is graded against (used by the UI's progress
   /// bar). Each kind exposes a single integer target.
   int get target => switch (kind) {
@@ -111,10 +132,19 @@ class PrereqProgress {
   final int currentProgress;
   final int target;
   final bool isMet;
+
+  /// Whole days left before the timeframe deadline (null = no timeframe).
+  /// Clamped at 0; the day of the deadline reads as "0 days left".
+  final int? daysLeft;
+
   const PrereqProgress({
     required this.def,
     required this.currentProgress,
     required this.target,
     required this.isMet,
+    this.daysLeft,
   });
+
+  /// True when a timeframe lapsed before the target was hit.
+  bool get isExpired => !isMet && daysLeft != null && daysLeft! <= 0;
 }

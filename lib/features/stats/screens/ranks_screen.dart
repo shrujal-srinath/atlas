@@ -1,9 +1,8 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
-import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/atlas_back_button.dart';
 import '../../xp/leveling_engine.dart';
 import '../../xp/leveling_providers.dart';
 import '../../xp/rank_tier.dart';
@@ -21,10 +20,7 @@ class RanksScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: c.background,
       appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(LucideIcons.chevronLeft),
-          onPressed: () => context.pop(),
-        ),
+        leading: const AtlasBackButton(fallback: '/stats'),
         title: Text('Rank Ladder', style: t.h2),
         centerTitle: true,
       ),

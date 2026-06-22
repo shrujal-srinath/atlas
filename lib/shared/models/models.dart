@@ -62,6 +62,10 @@ class AppUser {
   final String? quietHoursStart; // HH:mm
   final String? quietHoursEnd;
   final String defaultReminderTime;
+  /// Raw `notification_prefs` JSONB. Parsed into [NotificationPrefs] via the
+  /// `notificationPrefsProvider` so the model itself stays import-free of
+  /// notification-feature types (which would create an awkward cycle).
+  final Map<String, dynamic>? notificationPrefsRaw;
 
   // Onboarding
   final bool isOnboarded;
@@ -70,6 +74,11 @@ class AppUser {
   // Supabase (typically {athletic:40, mind:30, body:30}). Normalized to fractions
   // by [sectionWeightsProvider] before being used in scoring math.
   final Map<String, dynamic>? sectionWeightsJson;
+
+  // Manual per-meal calorie goals, raw jsonb keyed by meal_time dbValue
+  // (e.g. {breakfast: 1038, lunch: 1200}). Resolved against the auto-split of
+  // [dailyCalorieTarget] by `resolveMealTargets` / `mealTargetsProvider`.
+  final Map<String, dynamic>? mealCalorieTargetsJson;
 
   const AppUser({
     required this.id,
@@ -92,8 +101,10 @@ class AppUser {
     this.quietHoursStart,
     this.quietHoursEnd,
     this.defaultReminderTime = '08:00',
+    this.notificationPrefsRaw,
     this.isOnboarded = true,
     this.sectionWeightsJson,
+    this.mealCalorieTargetsJson,
   });
 
   factory AppUser.fromJson(Map<String, dynamic> j) => AppUser(
@@ -117,9 +128,13 @@ class AppUser {
         quietHoursStart: j['quiet_hours_start'] as String?,
         quietHoursEnd: j['quiet_hours_end'] as String?,
         defaultReminderTime: j['default_reminder_time'] as String? ?? '08:00',
+        notificationPrefsRaw:
+            (j['notification_prefs'] as Map?)?.cast<String, dynamic>(),
         isOnboarded: j['is_onboarded'] as bool? ?? true,
         sectionWeightsJson:
             (j['section_weights'] as Map?)?.cast<String, dynamic>(),
+        mealCalorieTargetsJson:
+            (j['meal_calorie_targets'] as Map?)?.cast<String, dynamic>(),
       );
 }
 
@@ -156,6 +171,12 @@ class Habit {
   final int sortOrder;
   final HabitPriority priority;
 
+  /// Raw `food_link` JSONB — a saved food link that auto-logs to the diary when
+  /// the task is completed. Parsed into `HabitFoodLink` in the habits feature
+  /// (kept raw here so this model stays free of food-feature types, mirroring
+  /// [notificationPrefsRaw]). Null when the task has no food link.
+  final Map<String, dynamic>? foodLinkRaw;
+
   const Habit({
     required this.id,
     required this.userId,
@@ -186,6 +207,7 @@ class Habit {
     this.dueDate,
     this.sortOrder = 0,
     this.priority = HabitPriority.normal,
+    this.foodLinkRaw,
   });
 
   factory Habit.fromJson(Map<String, dynamic> j) => Habit(
@@ -226,6 +248,7 @@ class Habit {
             : null,
         sortOrder: (j['sort_order'] as num?)?.toInt() ?? 0,
         priority: HabitPriorityParse.fromDb(j['priority'] as String?),
+        foodLinkRaw: (j['food_link'] as Map?)?.cast<String, dynamic>(),
       );
 
   static FrequencyMode _parseFreq(String? s) => switch (s) {
@@ -279,6 +302,7 @@ class Habit {
         if (dueDate != null) 'due_date': dueDate!.toIso8601String().split('T').first,
         'sort_order': sortOrder,
         'priority': priority.name,
+        if (foodLinkRaw != null) 'food_link': foodLinkRaw,
       };
 }
 

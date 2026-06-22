@@ -1,3 +1,19 @@
+/// A household serving measure for a food, e.g. ("Katori", 150 g).
+/// Catalog foods carry a list of these so the serving picker can offer
+/// food-specific units; everything scales back to grams.
+class FoodMeasure {
+  final String label;
+  final double grams;
+  const FoodMeasure(this.label, this.grams);
+
+  factory FoodMeasure.fromJson(Map<String, dynamic> j) => FoodMeasure(
+        (j['label'] as String?)?.trim().isNotEmpty == true
+            ? (j['label'] as String).trim()
+            : 'serving',
+        (j['g'] as num?)?.toDouble() ?? 0,
+      );
+}
+
 /// Master food catalogue row.
 ///
 /// All nutrient values are stored per `servingQty servingUnit` (e.g. per 100 g,
@@ -5,14 +21,16 @@
 class Food {
   final String id;
   final String? userId;          // null = global / OFF cache
-  final String source;           // 'off' | 'custom' | 'recipe'
+  final String source;           // 'ifct' | 'usda' | 'off' | 'custom' | 'recipe'
   final String? offBarcode;
+  final String? catalogId;       // 'ifct:A015' etc. — set for catalog foods
   final String name;
   final String? brand;
   final double servingQty;
   final String servingUnit;
   final Nutrients per;           // macros + micros, per serving above
   final bool isFavorite;
+  final List<FoodMeasure> measures; // food-specific household measures (catalog)
 
   const Food({
     required this.id,
@@ -25,6 +43,8 @@ class Food {
     required this.servingUnit,
     required this.per,
     required this.isFavorite,
+    this.catalogId,
+    this.measures = const [],
   });
 
   factory Food.fromJson(Map<String, dynamic> j) => Food(
@@ -40,10 +60,33 @@ class Food {
         isFavorite: j['is_favorite'] as bool? ?? false,
       );
 
+  /// Build from a `food_catalog` row returned by the `search_foods` RPC.
+  /// The catalog uses the same flat nutrient column names as `foods`, so
+  /// [Nutrients.fromColumns] maps macros + micros directly.
+  factory Food.fromCatalog(Map<String, dynamic> j) => Food(
+        id: j['id'] as String,
+        userId: null,
+        source: j['source'] as String? ?? 'ifct',
+        offBarcode: null,
+        catalogId: j['id'] as String,
+        name: j['name'] as String,
+        brand: (j['brand'] as String?)?.isEmpty == true ? null : j['brand'] as String?,
+        servingQty: (j['serving_qty'] as num?)?.toDouble() ?? 100,
+        servingUnit: j['serving_unit'] as String? ?? 'g',
+        per: Nutrients.fromColumns(j),
+        isFavorite: false,
+        measures: ((j['measures'] as List?) ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(FoodMeasure.fromJson)
+            .where((m) => m.grams > 0)
+            .toList(),
+      );
+
   Map<String, dynamic> toInsert() => {
         'user_id': userId,
         'source': source,
         if (offBarcode != null) 'off_barcode': offBarcode,
+        if (catalogId != null) 'catalog_id': catalogId,
         'name': name,
         if (brand != null) 'brand': brand,
         'serving_qty': servingQty,

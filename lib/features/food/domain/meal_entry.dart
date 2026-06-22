@@ -13,6 +13,7 @@ class MealEntry {
   final double qty;        // logged amount in `unit`
   final String unit;
   final Nutrients totals;  // snapshot for the logged amount
+  final String? loggedVia; // 'bundle' | 'habit' | null — how it was logged
 
   const MealEntry({
     required this.id,
@@ -24,6 +25,7 @@ class MealEntry {
     required this.qty,
     required this.unit,
     required this.totals,
+    this.loggedVia,
   });
 
   factory MealEntry.fromJson(Map<String, dynamic> j) {
@@ -46,6 +48,7 @@ class MealEntry {
       qty: (j['quantity'] as num?)?.toDouble() ?? 0,
       unit: j['unit'] as String? ?? 'g',
       totals: macros + micros,
+      loggedVia: j['logged_via'] as String?,
     );
   }
 

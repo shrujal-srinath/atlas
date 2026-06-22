@@ -1,4 +1,38 @@
-# Leveling & XP System — v2
+# Leveling & XP System — v2.1
+
+> **v2.1 (2026-06-11)** made the dual gate real. v2 shipped the score→XP
+> pipeline but derived the displayed level purely from XP, which made the
+> "can level up" check mathematically unsatisfiable — the overlay never fired
+> and milestones gated nothing. v2.1 adds the persisted **confirmed level**
+> (`users.confirmed_level`): XP nominates a *candidate*, the transition is
+> *confirmed* one step at a time when both gates pass. Key changes:
+>
+> - `gatedLevelInfo(confirmedLevel, totalXp)` in the engine: the level number
+>   is the confirmed level; once awarded it is never lost (XP floors at the
+>   level base). Past the XP threshold while milestone-gated, the bar reads
+>   full, `xpGatePassed == true`, and the overflow shows as **banked XP**.
+> - `LevelUpOverlay` now *confirms* transitions: persists `confirmed_level`
+>   (monotonic update), celebrates, writes the notification, pushes the
+>   picker. Banked XP spanning several levels chains one celebration at a time.
+> - Today's live score XP is clamped at ≥ 0 in the cumulative total — a
+>   below-50 day only locks in its negative XP when the snapshot persists
+>   after midnight (no more "-50 at 6 am" dips). The Progression delta tile
+>   still shows the honest negative number.
+> - The snapshot writer never reaches back before the user's first habit log,
+>   skips task-less days (a rest day is 0 XP, not -50), repairs intra-day
+>   bonus placeholder rows (score 0 / score_xp 0) on the next run, and caches
+>   `nutrition_ratio` on every row it writes.
+> - The nutrition bonus uses a dedicated `nutrition_bonus_awarded` flag
+>   (previously inferred from `bonus_xp > 0`, which an achievement unlock
+>   would falsely satisfy) and reads `todayNutritionRatioProvider`, pinned to
+>   today regardless of which date the food diary is browsing.
+> - `perfect_days` / `nutrition_days` milestone progress derives from
+>   `daily_score_snapshots` (+ today live) instead of recomputing 90 days of
+>   scores from raw logs.
+>
+> Migration: `supabase/migrations/20260611_leveling_v2_1.sql` (applied).
+> The sections below describe v2 and remain accurate except where superseded
+> by the notes above.
 
 ## 1. Philosophy
 

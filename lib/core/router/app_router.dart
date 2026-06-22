@@ -5,15 +5,19 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../features/auth/screens/login_screen.dart';
 import '../../features/auth/screens/signup_screen.dart';
+import '../../features/auth/screens/forgot_password_screen.dart';
 import '../../features/auth/providers/auth_provider.dart';
 import '../../shared/models/models.dart';
+import '../../shared/widgets/offline_pill.dart';
 import '../dev/dev_mode.dart';
 import '../../features/home/screens/home_screen.dart';
 import '../../features/home/widgets/quick_add_sheet.dart';
 import '../../features/habits/screens/habit_creation_screen.dart';
+import '../../features/habits/widgets/habit_type_picker.dart';
 import '../../features/habits/screens/habit_library_screen.dart';
 import '../../features/habits/screens/habit_detail_screen.dart';
 import '../../features/habits/screens/habit_focus_screen.dart';
+import '../../features/habits/screens/habit_stats_screen.dart';
 import '../../features/onboarding/onboarding_screen.dart';
 import '../../features/food/providers/food_providers.dart';
 import '../../features/food/screens/food_shell.dart';
@@ -21,12 +25,17 @@ import '../../features/food/screens/quick_add_sheet.dart' as food_quick;
 import '../../features/analytics/screens/analytics_screen.dart';
 import '../../features/stats/screens/stats_home_screen.dart';
 import '../../features/stats/screens/score_screen.dart';
-import '../../features/stats/screens/glance_screen.dart';
+import '../../features/me/screens/todo_screen.dart';
 import '../../features/stats/screens/progression_screen.dart';
 import '../../features/xp/screens/prereq_picker_screen.dart';
 import '../../features/stats/screens/ranks_screen.dart';
 import '../../features/journal/screens/journal_screen.dart';
+import '../../features/journal/screens/energy_checkin_screen.dart';
 import '../../features/notifications/notifications_screen.dart';
+import '../../features/me/screens/me_hub_screen.dart';
+import '../../features/notes/domain/note.dart';
+import '../../features/notes/screens/notes_screen.dart';
+import '../../features/notes/screens/note_editor_screen.dart';
 import '../../features/settings/screens/settings_screen.dart';
 import '../../core/theme/app_theme.dart';
 
@@ -37,6 +46,19 @@ class GoRouterRefreshListenable extends ChangeNotifier {
     ref.listen(appUserProvider, (_, _) => notifyListeners());
     ref.listen(authStateProvider, (_, _) => notifyListeners());
   }
+}
+
+/// Fade page for the auth routes so login ↔ signup and the hand-off from
+/// login to home crossfade instead of hard-cutting / platform-sliding.
+CustomTransitionPage<void> _fadePage(GoRouterState state, Widget child) {
+  return CustomTransitionPage<void>(
+    key: state.pageKey,
+    transitionDuration: const Duration(milliseconds: 420),
+    reverseTransitionDuration: const Duration(milliseconds: 320),
+    transitionsBuilder: (_, anim, _, child) =>
+        FadeTransition(opacity: anim, child: child),
+    child: child,
+  );
 }
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -54,8 +76,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       final loc = state.matchedLocation;
       final isAuthRoute = loc == '/login' || loc == '/signup';
       final isOnboardingRoute = loc == '/onboarding';
+      // Recovery is reachable while logged out, but (unlike login/signup) is
+      // NOT auto-redirected home once the recovery session lands — so the
+      // verify→set-new-password step can finish before we navigate.
+      final isRecoveryRoute = loc == '/forgot-password';
 
-      if (!isLoggedIn && !isAuthRoute) return '/login';
+      if (!isLoggedIn && !isAuthRoute && !isRecoveryRoute) return '/login';
       if (isLoggedIn && isAuthRoute) return '/home';
 
       // Onboarding gate: once we know the user row, push onboarding for
@@ -68,8 +94,19 @@ final routerProvider = Provider<GoRouter>((ref) {
       return null;
     },
     routes: [
-      GoRoute(path: '/login', builder: (_, _) => const LoginScreen()),
-      GoRoute(path: '/signup', builder: (_, _) => const SignupScreen()),
+      GoRoute(
+        path: '/login',
+        pageBuilder: (_, state) => _fadePage(state, const LoginScreen()),
+      ),
+      GoRoute(
+        path: '/signup',
+        pageBuilder: (_, state) => _fadePage(state, const SignupScreen()),
+      ),
+      GoRoute(
+        path: '/forgot-password',
+        pageBuilder: (_, state) =>
+            _fadePage(state, const ForgotPasswordScreen()),
+      ),
       GoRoute(path: '/onboarding', builder: (_, _) => const OnboardingScreen()),
       GoRoute(
         path: '/habit-creation',
@@ -85,6 +122,10 @@ final routerProvider = Provider<GoRouter>((ref) {
         },
       ),
       GoRoute(
+        path: '/habit-type',
+        builder: (_, _) => const HabitTypePickerScreen(),
+      ),
+      GoRoute(
         path: '/habits',
         builder: (_, _) => const HabitLibraryScreen(),
       ),
@@ -93,8 +134,16 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (_, _) => const NotificationsScreen(),
       ),
       GoRoute(
+        path: '/todo',
+        builder: (_, _) => const TodoScreen(),
+      ),
+      GoRoute(
         path: '/journal',
         builder: (_, _) => const JournalScreen(),
+      ),
+      GoRoute(
+        path: '/energy-checkin',
+        builder: (_, _) => const EnergyCheckinScreen(),
       ),
       GoRoute(
         path: '/level/prereq-picker/:level',
@@ -113,6 +162,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (_, state) =>
             HabitFocusScreen(habitId: state.pathParameters['id']!),
       ),
+      GoRoute(
+        path: '/habit/:id/stats',
+        builder: (_, state) =>
+            HabitStatsScreen(habitId: state.pathParameters['id']!),
+      ),
       StatefulShellRoute.indexedStack(
         builder: (context, state, shell) => _ScaffoldWithNav(shell: shell),
         branches: [
@@ -124,14 +178,35 @@ final routerProvider = Provider<GoRouter>((ref) {
               builder: (_, _) => const StatsHomeScreen(),
               routes: [
                 GoRoute(path: 'score', builder: (_, _) => const ScoreScreen()),
-                GoRoute(path: 'glance', builder: (_, _) => const GlanceScreen()),
                 GoRoute(path: 'progression', builder: (_, _) => const ProgressionScreen()),
                 GoRoute(path: 'trends', builder: (_, _) => const AnalyticsScreen()),
                 GoRoute(path: 'ranks', builder: (_, _) => const RanksScreen()),
               ],
             ),
           ]),
-          StatefulShellBranch(routes: [GoRoute(path: '/settings', builder: (_, _) => const SettingsScreen())]),
+          StatefulShellBranch(routes: [
+            GoRoute(
+              path: '/me',
+              builder: (_, _) => const MeHubScreen(),
+              routes: [
+                GoRoute(path: 'about', builder: (_, _) => const AboutMeScreen()),
+                GoRoute(path: 'settings', builder: (_, _) => const SettingsScreen()),
+                GoRoute(
+                  path: 'notes',
+                  builder: (_, _) => const NotesScreen(),
+                  routes: [
+                    GoRoute(
+                      path: ':id',
+                      builder: (_, state) => NoteEditorScreen(
+                        noteId: state.pathParameters['id']!,
+                        initial: state.extra is Note ? state.extra as Note : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ]),
         ],
       ),
     ],
@@ -163,7 +238,15 @@ class _ScaffoldWithNav extends ConsumerWidget {
     return Scaffold(
       backgroundColor: c.background,
       extendBody: true,
-      body: shell,
+      body: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            const OfflinePill(),
+            Expanded(child: shell),
+          ],
+        ),
+      ),
       bottomNavigationBar: AnimatedSlide(
         duration: const Duration(milliseconds: 220),
         curve: Curves.easeOutCubic,

@@ -1,6 +1,14 @@
 /// DB access for the `level_prerequisites` table. Pure CRUD; no business
 /// logic lives here. The progress-derivation lives in `prereq_providers.dart`.
+///
+/// NOTE: unlike the food repo, writes here go straight to Supabase and are
+/// *not* queued through [OfflineWriter] — an offline insert/delete silently
+/// no-ops (the screen invalidates + re-reads, so there's no UI desync, but the
+/// change is lost). Acceptable while prereqs are configured online; revisit if
+/// offline editing of prerequisites is needed.
 library;
+
+import 'package:flutter/foundation.dart';
 
 import '../../shared/services/supabase_service.dart';
 import 'models/level_prereq.dart';
@@ -33,7 +41,8 @@ class LevelPrereqRepository {
           .select('id')
           .single();
       return row['id'] as String;
-    } catch (_) {
+    } catch (e, s) {
+      if (kDebugMode) debugPrint('LevelPrereqRepository.insert failed: $e\n$s');
       return null;
     }
   }
@@ -44,15 +53,8 @@ class LevelPrereqRepository {
           .from('level_prerequisites')
           .delete()
           .eq('id', id);
-    } catch (_) {}
-  }
-
-  Future<void> markCompleted(String id) async {
-    try {
-      await SupabaseService.client
-          .from('level_prerequisites')
-          .update({'completed_at': DateTime.now().toIso8601String()})
-          .eq('id', id);
-    } catch (_) {}
+    } catch (e, s) {
+      if (kDebugMode) debugPrint('LevelPrereqRepository.delete failed: $e\n$s');
+    }
   }
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,10 +9,17 @@ import '../../auth/providers/auth_provider.dart';
 import '../../habits/providers/habit_provider.dart';
 import '../domain/journal_entry.dart';
 import '../providers/journal_providers.dart';
+import '../providers/mood_log_providers.dart';
 
-/// Inline daily check-in. Always shows tap-to-set 5-emoji mood + 5-bar energy
-/// for today; the sleep summary appears once a value lands. "Open journal"
-/// footer pushes the full editor. Persists to `daily_journal` on every tap.
+/// 1..5 mood faces, shared by the inline row and the collapsed chip.
+const _moodEmoji = ['😩', '😕', '😐', '🙂', '😄'];
+
+/// Inline daily check-in. Prompts for mood + energy on a **fixed 2-hour clock**
+/// — slots at 05:00, 07:00, … 21:00 (every two hours from 5am through 9pm). The
+/// card appears at the top of each slot and, the moment you answer both, slides
+/// off the page until the next slot is due. Outside 5am–9pm it stays away.
+/// Each answer appends a `mood_logs` timeseries row and updates `daily_journal`
+/// with the day's latest value. Past dates always show the full rows for edit.
 class WellnessCheckInCard extends ConsumerStatefulWidget {
   /// When true, the card omits the screen-horizontal padding so it can sit
   /// flush inside a parent with its own gutter (e.g. the BENTO home).
@@ -24,9 +32,39 @@ class WellnessCheckInCard extends ConsumerStatefulWidget {
 }
 
 class _WellnessCheckInCardState extends ConsumerState<WellnessCheckInCard> {
+  // Check-in schedule: every [_slotStepHours] from [_slotStartHour] through
+  // [_slotEndHour], each prompt living for a [_slotWindowHours] window.
+  static const int _slotStartHour = 5; // first prompt 5am
+  static const int _slotEndHour = 21; // last prompt 9pm
+  static const int _slotStepHours = 2;
+  static const int _slotWindowHours = 2;
+
   // Optimistic copy of today's entry so taps feel instant even when the
   // upsert RPC takes a beat to round-trip.
   JournalEntry? _local;
+
+  /// Optimistic completion time so the card hides instantly once both mood and
+  /// energy are set — works even in dev/offline where the `mood_logs` re-query
+  /// would come back empty.
+  DateTime? _committedAt;
+
+  // Re-evaluates visibility as the wall clock crosses a slot boundary, so the
+  // card appears at 07:00/09:00/… without needing a manual refresh.
+  Timer? _tick;
+
+  @override
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(const Duration(minutes: 1), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
 
   Future<void> _setField({int? mood, int? energy}) async {
     HapticFeedback.selectionClick();
@@ -34,12 +72,13 @@ class _WellnessCheckInCardState extends ConsumerState<WellnessCheckInCard> {
     final date = ref.read(selectedDateProvider);
     final current = _local ??
         ref.read(journalForSelectedDateProvider).valueOrNull ??
-        (user == null
-            ? null
-            : JournalEntry.empty(user.id, date));
+        (user == null ? null : JournalEntry.empty(user.id, date));
     if (current == null) return; // no auth, nothing to persist
     final updated = current.copyWith(mood: mood, energy: energy);
     setState(() => _local = updated);
+    // Decide completion against the local copy *now* so the exit animation
+    // begins on the same frame as the tap — the network write trails behind.
+    _commitIfComplete(updated);
     try {
       final repo = ref.read(journalRepositoryProvider);
       final persisted = await repo.upsert(updated);
@@ -51,12 +90,88 @@ class _WellnessCheckInCardState extends ConsumerState<WellnessCheckInCard> {
     }
   }
 
+  Future<void> _setMood(int v) => _setField(mood: v);
+  Future<void> _setEnergy(int v) => _setField(energy: v);
+
+  /// Once **both** mood and energy exist for today's active slot, optimistically
+  /// hide the card and append a single combined `mood_logs` point. Skips past
+  /// dates and avoids a duplicate write inside the same slot.
+  void _commitIfComplete(JournalEntry e) {
+    final now = DateTime.now();
+    if (!DateUtils.isSameDay(ref.read(selectedDateProvider), now)) return;
+    if (e.mood == null || e.energy == null) return; // need both
+
+    final slot = _currentSlotStart(now);
+    final lastFull = _lastFullCheckinTime();
+    if (slot != null && lastFull != null && !lastFull.isBefore(slot)) {
+      if (mounted) setState(() {}); // already logged this slot — keep hidden
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _committedAt = now); // hide on this frame
+    // Fire-and-forget the timeseries write; the optimistic hide already landed.
+    () async {
+      try {
+        await ref
+            .read(moodLogRepositoryProvider)
+            .add(mood: e.mood!, energy: e.energy!);
+        if (mounted) ref.invalidate(moodTodayLogsProvider);
+      } catch (_) {/* offline / dev */}
+    }();
+  }
+
+  /// Start of the slot currently accepting a check-in, or null when we're
+  /// outside prompting hours (before 5am, or past the 9pm slot's window).
+  DateTime? _currentSlotStart(DateTime now) {
+    if (now.hour < _slotStartHour) return null;
+    final steps = (now.hour - _slotStartHour) ~/ _slotStepHours;
+    final slotHour = _slotStartHour + steps * _slotStepHours;
+    if (slotHour > _slotEndHour) {
+      // Past the final (9pm) slot — only still active inside its window.
+      final last =
+          DateTime(now.year, now.month, now.day, _slotEndHour);
+      return now.difference(last) < const Duration(hours: _slotWindowHours)
+          ? last
+          : null;
+    }
+    return DateTime(now.year, now.month, now.day, slotHour);
+  }
+
+  /// Newest *complete* (mood + energy) check-in today, from the optimistic
+  /// commit or the persisted logs. Null when there is none.
+  DateTime? _lastFullCheckinTime() {
+    DateTime? at = _committedAt;
+    final logs = ref.read(moodTodayLogsProvider).valueOrNull ?? const [];
+    for (final l in logs) {
+      if (l.mood != null && l.energy != null) at = l.loggedAt; // newest last
+    }
+    return at;
+  }
+
+  /// Whether the prompt should be on screen right now (today only): inside an
+  /// active slot whose check-in hasn't been completed yet.
+  bool _shouldShow(DateTime now) {
+    final slot = _currentSlotStart(now);
+    if (slot == null) return false;
+    final lastFull = _lastFullCheckinTime();
+    return lastFull == null || lastFull.isBefore(slot);
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.c;
     final t = context.t;
     final entry = _local ??
         ref.watch(journalForSelectedDateProvider).valueOrNull;
+
+    // Visibility — today follows the fixed 2-hour slot clock; past dates always
+    // show the full rows for editing. Re-watch the logs so an external write
+    // (or invalidation) rebuilds the card.
+    final now = DateTime.now();
+    final selected = ref.watch(selectedDateProvider);
+    final isToday = DateUtils.isSameDay(selected, now);
+    ref.watch(moodTodayLogsProvider);
+    final hidden = isToday && !_shouldShow(now);
 
     final card = Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
@@ -113,12 +228,12 @@ class _WellnessCheckInCardState extends ConsumerState<WellnessCheckInCard> {
           const SizedBox(height: 10),
           _MoodRow(
             selected: entry?.mood,
-            onSelect: (v) => _setField(mood: v),
+            onSelect: _setMood,
           ),
           const SizedBox(height: 8),
           _EnergyRow(
             selected: entry?.energy,
-            onSelect: (v) => _setField(energy: v),
+            onSelect: _setEnergy,
           ),
           if (entry?.sleepHours != null || entry?.sleepQuality != null) ...[
             const SizedBox(height: 8),
@@ -132,10 +247,28 @@ class _WellnessCheckInCardState extends ConsumerState<WellnessCheckInCard> {
       ),
     );
 
-    if (widget.flush) return card;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpace.screenH),
-      child: card,
+    final content = widget.flush
+        ? card
+        : Padding(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpace.screenH),
+            child: card,
+          );
+
+    // Slot open → grow + fade in; answered (or slot over) → collapse + fade out.
+    // Both directions ride the same AnimatedSwitcher so the home column reflows
+    // smoothly either way.
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 340),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      transitionBuilder: (child, anim) => SizeTransition(
+        sizeFactor: anim,
+        axisAlignment: -1,
+        child: FadeTransition(opacity: anim, child: child),
+      ),
+      child: hidden
+          ? const SizedBox.shrink(key: ValueKey('mood-hidden'))
+          : KeyedSubtree(key: const ValueKey('mood-card'), child: content),
     );
   }
 }
@@ -146,8 +279,6 @@ class _MoodRow extends StatelessWidget {
   final int? selected;
   final ValueChanged<int> onSelect;
   const _MoodRow({required this.selected, required this.onSelect});
-
-  static const _emoji = ['😩', '😕', '😐', '🙂', '😄'];
 
   @override
   Widget build(BuildContext context) {
@@ -189,7 +320,7 @@ class _MoodRow extends StatelessWidget {
                 ),
                 alignment: Alignment.center,
                 child: Text(
-                  _emoji[i],
+                  _moodEmoji[i],
                   style: TextStyle(
                     fontSize: 18,
                     color: selected == null || selected == i + 1

@@ -63,12 +63,22 @@ class LevelInfo {
   /// `xpIntoLevel / xpForNextLevel` in `[0, 1]`.
   final double progress;
 
+  /// True when the XP gate for the next level is already cleared. With
+  /// [gatedLevelInfo] this means the user is waiting on milestones, not XP.
+  final bool xpGatePassed;
+
+  /// XP accumulated beyond the next-level threshold while milestone-gated.
+  /// Always 0 unless [xpGatePassed] is true.
+  final int bankedXp;
+
   const LevelInfo({
     required this.level,
     required this.totalXp,
     required this.xpIntoLevel,
     required this.xpForNextLevel,
     required this.progress,
+    this.xpGatePassed = false,
+    this.bankedXp = 0,
   });
 
   static const LevelInfo zero = LevelInfo(
@@ -80,8 +90,9 @@ class LevelInfo {
   );
 }
 
-/// Derives the current level from a cumulative XP value. Negative totals
-/// clamp to 0; the user never falls below Level 1.
+/// Derives the *candidate* level from a cumulative XP value — what the user
+/// would be at if XP were the only gate. Negative totals clamp to 0; the user
+/// never falls below Level 1.
 LevelInfo levelFromCumulative(int totalXp) {
   final t = totalXp < 0 ? 0 : totalXp;
   // Linear, integer-safe: level = 1 + floor(t / kXpPerLevel)
@@ -94,5 +105,35 @@ LevelInfo levelFromCumulative(int totalXp) {
     xpIntoLevel: xpIntoLevel,
     xpForNextLevel: kXpPerLevel,
     progress: progress.clamp(0.0, 1.0),
+  );
+}
+
+/// v2.1 dual-gated progression. The displayed level is the *confirmed* level
+/// (persisted in `users.confirmed_level`, awarded one step at a time when both
+/// the XP gate and all milestone pre-reqs pass) — cumulative XP alone only
+/// nominates a candidate.
+///
+/// Rules:
+/// - A confirmed level is never lost: XP is floored at `xpForLevel(confirmed)`,
+///   so negative days can drain progress *within* the level but never demote.
+/// - While the user is past the XP threshold but still milestone-gated, the
+///   bar reads full (`xpIntoLevel == xpForNextLevel`, `progress == 1.0`),
+///   [LevelInfo.xpGatePassed] is true, and the overflow is in
+///   [LevelInfo.bankedXp].
+LevelInfo gatedLevelInfo({required int confirmedLevel, required int totalXp}) {
+  final level = confirmedLevel < 1 ? 1 : confirmedLevel;
+  final base = xpForLevel(level);
+  final t = totalXp < base ? base : totalXp;
+  final rawInto = t - base;
+  final gatePassed = rawInto >= kXpPerLevel;
+  final xpIntoLevel = gatePassed ? kXpPerLevel : rawInto;
+  return LevelInfo(
+    level: level,
+    totalXp: t,
+    xpIntoLevel: xpIntoLevel,
+    xpForNextLevel: kXpPerLevel,
+    progress: (xpIntoLevel / kXpPerLevel).clamp(0.0, 1.0),
+    xpGatePassed: gatePassed,
+    bankedXp: gatePassed ? rawInto - kXpPerLevel : 0,
   );
 }

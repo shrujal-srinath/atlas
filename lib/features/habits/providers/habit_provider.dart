@@ -1,8 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/models/models.dart';
 import '../../../shared/services/supabase_service.dart';
 import '../../../core/dev/dev_mode.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../food/providers/food_providers.dart';
 
 final selectedDateProvider = StateProvider<DateTime>((ref) => DateTime.now());
 
@@ -34,7 +36,10 @@ final allHabitsProvider = FutureProvider<List<Habit>>((ref) async {
   return (data as List).map((e) => Habit.fromJson(e)).toList();
 });
 
-final habitLogsForDateProvider = FutureProvider.family<List<HabitLog>, String>((ref, date) async {
+final habitLogsForDateProvider = FutureProvider.family<List<HabitLog>, String>((
+  ref,
+  date,
+) async {
   if (ref.watch(devModeProvider)) {
     return generateMockLogs().where((l) => l.date == date).toList();
   }
@@ -61,6 +66,47 @@ final recentHabitLogsProvider = FutureProvider<List<HabitLog>>((ref) async {
       .select()
       .eq('user_id', session.user.id)
       .gte('date', sinceStr);
+  return (data as List).map((e) => HabitLog.fromJson(e)).toList();
+});
+
+/// All-time *completed* habit logs. Powers cumulative and long-streak
+/// achievement stats that the 60-day [recentHabitLogsProvider] window can't
+/// see — lifetime totals (100 gym sessions, 1,000 pages) and streaks longer
+/// than 60 days (`streak_100`, `streakzilla`, veteran active-day runs).
+final lifetimeCompletedLogsProvider = FutureProvider<List<HabitLog>>((
+  ref,
+) async {
+  if (ref.watch(devModeProvider)) return generateMockLogs();
+  final session = ref.watch(sessionProvider);
+  if (session == null) return [];
+  final data = await SupabaseService.client
+      .from('habit_logs')
+      .select()
+      .eq('user_id', session.user.id)
+      .eq('completed', true);
+  return (data as List).map((e) => HabitLog.fromJson(e)).toList();
+});
+
+/// All logs for a single habit over the last ~366 days — powers the per-task
+/// stats screen. A longer window than the 60-day [recentHabitLogsProvider] but
+/// scoped to one habit, so it stays tiny. Ordered oldest → newest.
+final habitLogHistoryProvider =
+    FutureProvider.family<List<HabitLog>, String>((ref, habitId) async {
+  if (ref.watch(devModeProvider)) {
+    return generateMockLogs().where((l) => l.habitId == habitId).toList();
+  }
+  final session = ref.watch(sessionProvider);
+  if (session == null) return [];
+  final since = DateTime.now().subtract(const Duration(days: 366));
+  final sinceStr =
+      '${since.year}-${since.month.toString().padLeft(2, '0')}-${since.day.toString().padLeft(2, '0')}';
+  final data = await SupabaseService.client
+      .from('habit_logs')
+      .select()
+      .eq('user_id', session.user.id)
+      .eq('habit_id', habitId)
+      .gte('date', sinceStr)
+      .order('date');
   return (data as List).map((e) => HabitLog.fromJson(e)).toList();
 });
 
@@ -173,7 +219,9 @@ class HabitActionsNotifier extends StateNotifier<AsyncValue<void>> {
         .eq('date', date)
         .maybeSingle();
 
-    final isCompleted = completed ?? (existing != null ? !(existing['completed'] as bool) : true);
+    final isCompleted =
+        completed ??
+        (existing != null ? !(existing['completed'] as bool) : true);
 
     final payload = <String, dynamic>{
       'habit_id': habitId,
@@ -181,10 +229,11 @@ class HabitActionsNotifier extends StateNotifier<AsyncValue<void>> {
       'date': date,
       'completed': isCompleted,
       'urge_only': urgeOnly,
-      if (effortRating != null && effortRating > 0) 'effort_rating': effortRating,
+      if (effortRating != null && effortRating > 0)
+        'effort_rating': effortRating,
       if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
-      if (triggerTag != null) 'trigger_tag': triggerTag,
-      if (actualValue != null) 'actual_value': actualValue,
+      'trigger_tag': ?triggerTag,
+      'actual_value': ?actualValue,
     };
 
     if (existing != null) {
@@ -196,6 +245,9 @@ class HabitActionsNotifier extends StateNotifier<AsyncValue<void>> {
       await SupabaseService.client.from('habit_logs').insert(payload);
     }
 
+    // Auto-log / un-log any linked food for this task on this date.
+    await _syncFoodLink(habitId: habitId, date: date, completed: isCompleted);
+
     // Level XP for v2 is derived entirely from the daily score (see
     // lib/features/xp/leveling_engine.dart). Per-task XP is no longer written
     // to xp_events — the activity feed now shows `contributedPts` directly
@@ -206,57 +258,51 @@ class HabitActionsNotifier extends StateNotifier<AsyncValue<void>> {
     _ref.invalidate(habitLogsForDateProvider(date));
     _ref.invalidate(recentHabitLogsProvider);
   }
+
+  /// Mirror a task's food link into the diary when it's completed (and remove
+  /// it when un-completed). Best-effort: a food-log failure never blocks the
+  /// habit toggle. Invalidating [diaryEntriesProvider] keeps both the diary and
+  /// today's home/nutrition score live (see food_providers.dart:215-223).
+  Future<void> _syncFoodLink({
+    required String habitId,
+    required String date,
+    required bool completed,
+  }) async {
+    if (_ref.read(devModeProvider)) return;
+    final habits = _ref.read(habitsProvider).valueOrNull ?? const <Habit>[];
+    Habit? habit;
+    for (final h in habits) {
+      if (h.id == habitId) {
+        habit = h;
+        break;
+      }
+    }
+    final link = habit?.foodLinkRaw;
+    if (link == null) return;
+
+    try {
+      final repo = _ref.read(foodRepositoryProvider);
+      final d = DateTime.parse(date);
+      if (completed) {
+        await repo.logHabitLink(habitId: habitId, link: link, date: d);
+      } else {
+        await repo.removeHabitLink(habitId: habitId, date: d);
+      }
+      _ref.invalidate(diaryEntriesProvider);
+    } catch (e, st) {
+      if (kDebugMode) debugPrint('food link sync failed: $e\n$st');
+    }
+  }
 }
 
 final habitActionsProvider =
     StateNotifierProvider<HabitActionsNotifier, AsyncValue<void>>(
-  (ref) => HabitActionsNotifier(ref),
-);
+      (ref) => HabitActionsNotifier(ref),
+    );
 
 int _dayOfWeek(DateTime date) => date.weekday;
 
 List<Habit> habitsForDate(List<Habit> all, DateTime date) {
   final dow = _dayOfWeek(date);
   return all.where((h) => h.daysOfWeek.contains(dow)).toList();
-}
-
-/// Returns the effective time period for a habit.
-/// Uses explicit timePeriod if set; falls back to section as proxy.
-TimePeriod effectivePeriod(Habit h) {
-  if (h.timePeriod != null) return h.timePeriod!;
-  return switch (h.section) {
-    HabitSection.athletic => TimePeriod.morning,
-    HabitSection.mind => TimePeriod.afternoon,
-    HabitSection.body => TimePeriod.evening,
-  };
-}
-
-/// Groups habits by time period, sorted by scheduledTime within each period.
-Map<TimePeriod, List<Habit>> groupByPeriod(List<Habit> habits) {
-  final map = <TimePeriod, List<Habit>>{
-    TimePeriod.morning: [],
-    TimePeriod.afternoon: [],
-    TimePeriod.evening: [],
-  };
-  for (final h in habits) {
-    map[effectivePeriod(h)]!.add(h);
-  }
-  // Sort by scheduledTime within each period
-  for (final list in map.values) {
-    list.sort((a, b) {
-      if (a.scheduledTime == null && b.scheduledTime == null) return 0;
-      if (a.scheduledTime == null) return 1;
-      if (b.scheduledTime == null) return -1;
-      return a.scheduledTime!.compareTo(b.scheduledTime!);
-    });
-  }
-  return map;
-}
-
-/// Returns which period is currently active based on the hour.
-TimePeriod activePeriodNow() {
-  final h = DateTime.now().hour;
-  if (h < 12) return TimePeriod.morning;
-  if (h < 18) return TimePeriod.afternoon;
-  return TimePeriod.evening;
 }

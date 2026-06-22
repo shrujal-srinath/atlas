@@ -44,7 +44,6 @@ class HomeScore {
   final int done;
   final int total;
   final Map<HabitSection, int> sectionPct;
-  final int streakDays;        // best streak across user's tracked habits today
   final int projectedScore;    // if remaining tasks get completed
   /// Per-task contributions, sorted highest-impact first. Drives the
   /// "where your score comes from" list on the score detail page.
@@ -54,7 +53,6 @@ class HomeScore {
     required this.done,
     required this.total,
     required this.sectionPct,
-    required this.streakDays,
     required this.projectedScore,
     this.perTaskContrib = const [],
   });
@@ -94,7 +92,11 @@ String _dateKey(DateTime d) =>
 String _dowLabel(int weekday) =>
     const ['M', 'T', 'W', 'T', 'F', 'S', 'S'][(weekday - 1).clamp(0, 6)];
 
-String _periodForHabit(Habit h) {
+/// The day-part a habit belongs to ('MORNING' | 'AFTERNOON' | 'EVENING' |
+/// 'NIGHT'), from its [Habit.timePeriod] or scheduled time. Public so the
+/// Trends time-of-day breakdown can bucket completions the same way the home
+/// task list groups them.
+String periodForHabit(Habit h) {
   final tp = h.timePeriod;
   if (tp != null) {
     return switch (tp) {
@@ -167,7 +169,7 @@ final homeTasksProvider =
     tasks.add(HomeTask(
       habit: h,
       log: l,
-      period: _periodForHabit(h),
+      period: periodForHabit(h),
       time: h.scheduledTime ?? '',
       ratio: taskRatio(h, l),
       streak: calculateStreak(h, recentByHabit[h.id] ?? const []),
@@ -198,10 +200,12 @@ const double kNutritionBodyWeight = 0.5;
 /// engine — this provider is a thin adapter that fetches inputs, looks up
 /// section weights, and re-wraps the result as a [HomeScore] for UI consumers.
 ///
-/// For today's date, the body section is blended 50/50 with the day's
-/// nutrition adherence ratio (calorie + protein, phase-aware). Past dates
-/// stay habit-only because we don't compute historical nutrition adherence
-/// per date right now (todo: wire diary date → score date for time-travel).
+/// Today and past dates blend the body section 50/50 with that day's
+/// nutrition adherence ratio (calorie + protein, phase-aware) — today via the
+/// live [todayNutritionRatioProvider], past days via the per-date
+/// [nutritionRatioForDateProvider]. Future dates stay habit-only (no food
+/// logged yet). This keeps the score the snapshot writer persists consistent
+/// with what the score screen shows when browsing history.
 final homeScoreProvider =
     FutureProvider.family<HomeScore, DateTime>((ref, date) async {
   final tasks = await ref.watch(homeTasksProvider(date).future);
@@ -216,7 +220,6 @@ final homeScoreProvider =
         HabitSection.mind: 0,
         HabitSection.body: 0,
       },
-      streakDays: 0,
       projectedScore: 0,
     );
   }
@@ -225,13 +228,21 @@ final homeScoreProvider =
     sectionWeights: weights,
   );
 
-  // Blend nutrition into the body section for today only.
+  // Blend nutrition into the body section for today (live) and past days
+  // (time-travel). Future days have no food logged yet → habit-only.
   final now = DateTime.now();
-  final isToday = date.year == now.year &&
-      date.month == now.month &&
-      date.day == now.day;
-  final nutritionRatio =
-      isToday ? ref.watch(nutritionRatioProvider) : null;
+  final dateOnly = DateTime(date.year, date.month, date.day);
+  final todayOnly = DateTime(now.year, now.month, now.day);
+  final isToday = dateOnly == todayOnly;
+  final isFuture = dateOnly.isAfter(todayOnly);
+  double? nutritionRatio;
+  if (isToday) {
+    // Live, invalidation-wired ratio — must stay pinned to today.
+    nutritionRatio = ref.watch(todayNutritionRatioProvider);
+  } else if (!isFuture) {
+    nutritionRatio =
+        await ref.watch(nutritionRatioForDateProvider(dateOnly).future);
+  }
 
   double bodyRatio = b.sectionRatio[HabitSection.body] ?? 0;
   double bodyProjected = b.sectionPotential[HabitSection.body] ?? 0;
@@ -273,7 +284,6 @@ final homeScoreProvider =
     done: b.doneCount,
     total: b.totalCount,
     sectionPct: sectionPct,
-    streakDays: 0, // wired in Sprint 7 (streak engine)
     projectedScore: blendedProjected,
     perTaskContrib: b.perTaskContrib,
   );

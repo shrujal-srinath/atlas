@@ -2,19 +2,28 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/error_messages.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../habits/providers/habit_provider.dart';
 import '../domain/journal_entry.dart';
+import '../domain/mood_log.dart';
 import '../providers/journal_providers.dart';
+import '../providers/mood_log_providers.dart';
+
+part 'journal_widgets.dart';
+
+const _moodEmoji = ['😩', '😕', '😐', '🙂', '😄'];
 
 /// Full daily journal + wellness editor for the selected date.
 ///
-/// Auto-saves on field change after a 600ms debounce. All five wellness
-/// dimensions (mood, energy, soreness, sleep hours, sleep quality) plus
-/// morning intent + night review live on a single scrollable surface.
+/// Auto-saves on field change after a 600ms debounce. Morning (intent + top-3
+/// goals), wellness, sleep, and a structured evening reflection (wins /
+/// to-improve / gratitude / day-rating / free review) live on one scroll, with
+/// today's mood timeline and a recent-entries history at the foot.
 class JournalScreen extends ConsumerStatefulWidget {
   const JournalScreen({super.key});
 
@@ -26,6 +35,10 @@ class _JournalScreenState extends ConsumerState<JournalScreen> {
   late final TextEditingController _intent;
   late final TextEditingController _review;
   late final TextEditingController _sleep;
+  late final TextEditingController _wins;
+  late final TextEditingController _improve;
+  late final TextEditingController _gratitude;
+  late final List<TextEditingController> _goals;
 
   Timer? _debounce;
   JournalEntry? _current;
@@ -37,6 +50,10 @@ class _JournalScreenState extends ConsumerState<JournalScreen> {
     _intent = TextEditingController();
     _review = TextEditingController();
     _sleep = TextEditingController();
+    _wins = TextEditingController();
+    _improve = TextEditingController();
+    _gratitude = TextEditingController();
+    _goals = List.generate(3, (_) => TextEditingController());
   }
 
   @override
@@ -45,6 +62,12 @@ class _JournalScreenState extends ConsumerState<JournalScreen> {
     _intent.dispose();
     _review.dispose();
     _sleep.dispose();
+    _wins.dispose();
+    _improve.dispose();
+    _gratitude.dispose();
+    for (final g in _goals) {
+      g.dispose();
+    }
     super.dispose();
   }
 
@@ -55,6 +78,12 @@ class _JournalScreenState extends ConsumerState<JournalScreen> {
     _intent.text = entry.morningIntent ?? '';
     _review.text = entry.nightReview ?? '';
     _sleep.text = entry.sleepHours?.toString() ?? '';
+    _wins.text = entry.wins ?? '';
+    _improve.text = entry.improve ?? '';
+    _gratitude.text = entry.gratitude ?? '';
+    for (int i = 0; i < _goals.length; i++) {
+      _goals[i].text = i < entry.goals.length ? entry.goals[i] : '';
+    }
   }
 
   void _queueSave() {
@@ -62,21 +91,43 @@ class _JournalScreenState extends ConsumerState<JournalScreen> {
     _debounce = Timer(const Duration(milliseconds: 600), _flush);
   }
 
+  String? _nullIfBlank(String s) => s.trim().isEmpty ? null : s.trim();
+
   Future<void> _flush() async {
     final entry = _current;
     if (entry == null) return;
-    final intent = _intent.text.trim();
-    final review = _review.text.trim();
     final sleep = double.tryParse(_sleep.text.trim());
-    final updated = entry.copyWith(
-      morningIntent: intent.isEmpty ? null : intent,
-      nightReview: review.isEmpty ? null : review,
+    final goals =
+        _goals.map((g) => g.text.trim()).where((s) => s.isNotEmpty).toList();
+    // Build the full entry directly (not copyWith) so clearing a text field
+    // actually persists the clear.
+    final updated = JournalEntry(
+      id: entry.id,
+      userId: entry.userId,
+      date: entry.date,
+      morningIntent: _nullIfBlank(_intent.text),
+      goals: goals,
+      nightReview: _nullIfBlank(_review.text),
+      wins: _nullIfBlank(_wins.text),
+      improve: _nullIfBlank(_improve.text),
+      gratitude: _nullIfBlank(_gratitude.text),
+      dayRating: entry.dayRating,
+      mood: entry.mood,
+      energy: entry.energy,
+      soreness: entry.soreness,
       sleepHours: sleep,
+      sleepQuality: entry.sleepQuality,
     );
-    final repo = ref.read(journalRepositoryProvider);
-    final persisted = await repo.upsert(updated);
-    _current = persisted;
-    ref.invalidate(journalForSelectedDateProvider);
+    _current = updated;
+    try {
+      final repo = ref.read(journalRepositoryProvider);
+      final persisted = await repo.upsert(updated);
+      _current = persisted;
+      ref.invalidate(journalForSelectedDateProvider);
+      ref.invalidate(journalLast30Provider);
+    } catch (_) {
+      // Offline / dev — keep the local copy; the next open or sync retries.
+    }
   }
 
   Future<void> _setRating(String field, int value) async {
@@ -96,12 +147,20 @@ class _JournalScreenState extends ConsumerState<JournalScreen> {
       case 'sleep_quality':
         entry = entry.copyWith(sleepQuality: value);
         break;
+      case 'day_rating':
+        entry = entry.copyWith(dayRating: value);
+        break;
     }
     setState(() => _current = entry);
-    final repo = ref.read(journalRepositoryProvider);
-    final persisted = await repo.upsert(entry);
-    _current = persisted;
-    ref.invalidate(journalForSelectedDateProvider);
+    try {
+      final repo = ref.read(journalRepositoryProvider);
+      final persisted = await repo.upsert(entry);
+      _current = persisted;
+      ref.invalidate(journalForSelectedDateProvider);
+      ref.invalidate(journalLast30Provider);
+    } catch (_) {
+      // Offline / dev — local state stands; the next open or sync retries.
+    }
   }
 
   @override
@@ -110,6 +169,8 @@ class _JournalScreenState extends ConsumerState<JournalScreen> {
     final date = ref.watch(selectedDateProvider);
     final user = ref.watch(appUserProvider).valueOrNull;
     final entryAsync = ref.watch(journalForSelectedDateProvider);
+    final streak = ref.watch(journalingStreakProvider);
+    final isToday = DateUtils.isSameDay(date, DateTime.now());
 
     return Scaffold(
       appBar: AppBar(
@@ -122,24 +183,31 @@ class _JournalScreenState extends ConsumerState<JournalScreen> {
         leading: IconButton(
           icon: const Icon(LucideIcons.chevronLeft),
           onPressed: () async {
-            await _flush();
-            if (context.mounted) Navigator.of(context).pop();
+            try {
+              await _flush();
+            } catch (_) {}
+            if (context.mounted) context.pop();
           },
         ),
+        actions: [
+          if (streak > 0)
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: _StreakChip(days: streak),
+            ),
+        ],
       ),
       body: entryAsync.when(
         loading: () => Center(
           child: CircularProgressIndicator(color: c.accent, strokeWidth: 2),
         ),
         error: (e, _) => Center(
-          child: Text(e.toString(),
+          child: Text(friendlyError(e),
               style: TextStyle(color: c.negative, fontSize: 13)),
         ),
         data: (existing) {
           final base = existing ??
-              (user == null
-                  ? null
-                  : JournalEntry.empty(user.id, date));
+              (user == null ? null : JournalEntry.empty(user.id, date));
           if (base == null) {
             return Center(
                 child: Text('Sign in to journal',
@@ -152,6 +220,8 @@ class _JournalScreenState extends ConsumerState<JournalScreen> {
             padding: const EdgeInsets.fromLTRB(
                 AppSpace.screenH, 12, AppSpace.screenH, 80),
             children: [
+              if (isToday) const _MoodTimeline(),
+
               _SectionLabel(text: 'Morning intent'),
               const SizedBox(height: 8),
               _Field(
@@ -160,6 +230,20 @@ class _JournalScreenState extends ConsumerState<JournalScreen> {
                 onChanged: (_) => _queueSave(),
                 icon: LucideIcons.target,
               ),
+              const SizedBox(height: 12),
+              _SectionLabel(text: "Today's goals"),
+              const SizedBox(height: 8),
+              for (int i = 0; i < _goals.length; i++) ...[
+                _Field(
+                  controller: _goals[i],
+                  hint: 'Goal ${i + 1}',
+                  onChanged: (_) => _queueSave(),
+                  icon: i == 0
+                      ? LucideIcons.flag
+                      : LucideIcons.cornerDownRight,
+                ),
+                if (i != _goals.length - 1) const SizedBox(height: 6),
+              ],
               const SizedBox(height: 20),
 
               _SectionLabel(text: 'Wellness'),
@@ -198,7 +282,8 @@ class _JournalScreenState extends ConsumerState<JournalScreen> {
                       hint: 'Hours',
                       onChanged: (_) => _queueSave(),
                       icon: LucideIcons.moon,
-                      keyboard: const TextInputType.numberWithOptions(decimal: true),
+                      keyboard:
+                          const TextInputType.numberWithOptions(decimal: true),
                     ),
                   ),
                 ],
@@ -212,153 +297,52 @@ class _JournalScreenState extends ConsumerState<JournalScreen> {
               ),
               const SizedBox(height: 20),
 
-              _SectionLabel(text: 'Night review'),
+              _SectionLabel(text: 'Evening reflection'),
+              const SizedBox(height: 8),
+              _RatingRow(
+                icon: LucideIcons.star,
+                label: 'Day rating',
+                value: current.dayRating,
+                onSelect: (v) => _setRating('day_rating', v),
+              ),
               const SizedBox(height: 8),
               _Field(
+                controller: _wins,
+                hint: 'What went well today?',
+                onChanged: (_) => _queueSave(),
+                icon: LucideIcons.checkCircle2,
+                maxLines: 3,
+              ),
+              const SizedBox(height: 6),
+              _Field(
+                controller: _improve,
+                hint: 'What to improve tomorrow?',
+                onChanged: (_) => _queueSave(),
+                icon: LucideIcons.trendingUp,
+                maxLines: 3,
+              ),
+              const SizedBox(height: 6),
+              _Field(
+                controller: _gratitude,
+                hint: 'Grateful for…',
+                onChanged: (_) => _queueSave(),
+                icon: LucideIcons.heart,
+                maxLines: 2,
+              ),
+              const SizedBox(height: 6),
+              _Field(
                 controller: _review,
-                hint: 'What went well · what to fix tomorrow',
+                hint: 'Anything else on your mind',
                 onChanged: (_) => _queueSave(),
                 icon: LucideIcons.bookOpen,
                 maxLines: 4,
               ),
+              const SizedBox(height: 24),
+
+              const _HistoryList(),
             ],
           );
         },
-      ),
-    );
-  }
-}
-
-class _SectionLabel extends StatelessWidget {
-  final String text;
-  const _SectionLabel({required this.text});
-
-  @override
-  Widget build(BuildContext context) =>
-      Text(text.toUpperCase(),
-          style: AppType.overline.copyWith(color: context.c.textMuted));
-}
-
-class _Field extends StatelessWidget {
-  final TextEditingController controller;
-  final String hint;
-  final ValueChanged<String> onChanged;
-  final IconData icon;
-  final int maxLines;
-  final TextInputType? keyboard;
-
-  const _Field({
-    required this.controller,
-    required this.hint,
-    required this.onChanged,
-    required this.icon,
-    this.maxLines = 1,
-    this.keyboard,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: c.surface,
-        borderRadius: BorderRadius.circular(AppRadii.card),
-        border: Border.all(color: c.border),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 14),
-            child: Icon(icon, size: 14, color: c.textMuted),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: TextField(
-              controller: controller,
-              minLines: 1,
-              maxLines: maxLines,
-              keyboardType: keyboard,
-              onChanged: onChanged,
-              style: context.t.body,
-              decoration: InputDecoration(
-                hintText: hint,
-                hintStyle: AppType.body.copyWith(color: c.textDim),
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                isDense: true,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RatingRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final int? value;
-  final ValueChanged<int> onSelect;
-  final String? lowLabel;
-  final String? highLabel;
-
-  const _RatingRow({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.onSelect,
-    this.lowLabel,
-    this.highLabel,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: c.surface,
-        borderRadius: BorderRadius.circular(AppRadii.card),
-        border: Border.all(color: c.border),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 14, color: c.textMuted),
-          const SizedBox(width: 10),
-          Text(label,
-              style: AppType.bodyStrong.copyWith(
-                  color: c.textPrimary, fontSize: 13)),
-          const Spacer(),
-          for (int i = 1; i <= 5; i++)
-            Padding(
-              padding: const EdgeInsets.only(left: 4),
-              child: GestureDetector(
-                onTap: () => onSelect(i),
-                child: Container(
-                  width: 30,
-                  height: 30,
-                  decoration: BoxDecoration(
-                    color: value == i ? c.accent : c.surfaceElevated,
-                    borderRadius: BorderRadius.circular(AppRadii.chip),
-                    border: Border.all(
-                      color: value == i ? c.accent : c.border,
-                    ),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    '$i',
-                    style: AppType.numMd.copyWith(
-                      color: value == i ? c.onAccent : c.textSecondary,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
       ),
     );
   }

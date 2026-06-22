@@ -1,16 +1,17 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/models.dart';
+import '../../../shared/widgets/atlas_back_button.dart';
 import '../../habits/providers/habit_provider.dart';
 import '../../home/providers/home_providers.dart';
 import '../../home/scoring/score_engine.dart';
 import '../../home/widgets/habit_log_modal.dart';
 import '../../home/widgets/triple_arc_ring.dart';
+import '../../xp/leveling_providers.dart';
 
 /// Today's Score deep-dive. Five-section layout: big ring → section
 /// breakdown → per-task contributions → "what's left to peak" → 7-day trend.
@@ -28,6 +29,7 @@ class ScoreScreen extends ConsumerWidget {
 
     final score = scoreAsync.valueOrNull;
     final week = weekAsync.valueOrNull;
+    final streak = ref.watch(currentScoreStreakProvider).valueOrNull ?? 0;
     final contribs = score?.perTaskContrib ?? const <TaskContribution>[];
     final pending = contribs.where((c) => !c.isCompleted).toList()
       ..sort((a, b) => b.remainingPts.compareTo(a.remainingPts));
@@ -37,10 +39,7 @@ class ScoreScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: c.background,
       appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(LucideIcons.chevronLeft),
-          onPressed: () => context.pop(),
-        ),
+        leading: const AtlasBackButton(fallback: '/stats'),
         title: Text("Today's Score", style: t.h2),
         centerTitle: true,
       ),
@@ -61,7 +60,7 @@ class ScoreScreen extends ConsumerWidget {
             padding: const EdgeInsets.fromLTRB(
                 AppSpace.screenH, 12, AppSpace.screenH, 118),
             children: [
-              _BigScoreCard(score: score),
+              _BigScoreCard(score: score, streak: streak),
               const SizedBox(height: 22),
               _Section(label: 'SECTION BREAKDOWN'),
               const SizedBox(height: 8),
@@ -115,7 +114,8 @@ class ScoreScreen extends ConsumerWidget {
 
 class _BigScoreCard extends StatelessWidget {
   final HomeScore? score;
-  const _BigScoreCard({required this.score});
+  final int streak;
+  const _BigScoreCard({required this.score, required this.streak});
 
   @override
   Widget build(BuildContext context) {
@@ -158,7 +158,7 @@ class _BigScoreCard extends StatelessWidget {
                   color: c.accent,
                 ),
                 _Pill(
-                  text: '${s?.streakDays ?? 0}-day',
+                  text: '$streak-day',
                   icon: LucideIcons.flame,
                   color: c.amber,
                 ),
@@ -224,15 +224,6 @@ class _BreakdownCard extends StatelessWidget {
     HabitSection.body: 'Body',
   };
 
-  Color _color(BuildContext context, HabitSection s) {
-    final c = context.c;
-    return switch (s) {
-      HabitSection.athletic => c.athletic,
-      HabitSection.mind => c.mind,
-      HabitSection.body => c.body,
-    };
-  }
-
   int _weightPct(HabitSection s) => ((weights[s] ?? 0) * 100).round();
 
   double _contribution(HabitSection s) {
@@ -263,7 +254,7 @@ class _BreakdownCard extends StatelessWidget {
               weightPct: _weightPct(HabitSection.values[i]),
               contribution: _contribution(HabitSection.values[i]).round(),
               label: _labels[HabitSection.values[i]]!,
-              color: _color(context, HabitSection.values[i]),
+              color: HabitSection.values[i].color(context.c),
             ),
             if (i < HabitSection.values.length - 1) const SizedBox(height: 11),
           ],
@@ -467,22 +458,13 @@ class _ContribRow extends StatelessWidget {
   final VoidCallback onTap;
   const _ContribRow({required this.contrib, required this.onTap});
 
-  Color _sectionColor(BuildContext context, HabitSection s) {
-    final c = context.c;
-    return switch (s) {
-      HabitSection.athletic => c.athletic,
-      HabitSection.mind => c.mind,
-      HabitSection.body => c.body,
-    };
-  }
-
   static String _fmtPts(double v) => v.toStringAsFixed(1);
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
     final h = contrib.habit;
-    final color = _sectionColor(context, h.section);
+    final color = h.section.color(context.c);
     final done = contrib.isCompleted;
     final muted = contrib.ratio < 0.01;
     return InkWell(
@@ -677,15 +659,6 @@ class _PeakCard extends StatelessWidget {
     required this.onTapHabit,
   });
 
-  Color _sectionColor(BuildContext context, HabitSection s) {
-    final c = context.c;
-    return switch (s) {
-      HabitSection.athletic => c.athletic,
-      HabitSection.mind => c.mind,
-      HabitSection.body => c.body,
-    };
-  }
-
   @override
   Widget build(BuildContext context) {
     final c = context.c;
@@ -780,7 +753,7 @@ class _PeakCard extends StatelessWidget {
           for (int i = 0; i < rows.length; i++) ...[
             _PeakRow(
               row: rows[i],
-              color: _sectionColor(context, rows[i].habit.section),
+              color: rows[i].habit.section.color(context.c),
               onTap: () => onTapHabit(rows[i].habit, rows[i].log),
             ),
             if (i < rows.length - 1)

@@ -4,11 +4,22 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/atlas_controls.dart';
+import '../../../core/utils/error_messages.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../shared/models/models.dart';
 import '../../../shared/services/notification_service.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../food/domain/meal_entry.dart'; // MealTimeSlotX, kDiarySlotOrder
+import '../../food/providers/food_providers.dart'; // foodRepositoryProvider
+import '../../food/screens/food_detail_screen.dart'; // FoodSelection
+import '../../food/screens/food_search_sheet.dart'; // FoodSearchSheet
+import '../models/habit_food_link.dart';
 import '../providers/habit_provider.dart';
+
+part 'habit_creation_fields.dart';
+part 'habit_creation_rows.dart';
+part 'habit_creation_goal_sheet.dart';
 
 const _dayLabels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
@@ -55,6 +66,9 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
   bool _showAdvanced = false;
   bool _saving = false;
 
+  HabitFoodLink? _foodLink;
+  bool _addingFood = false;
+
   bool get _isEditing => widget.existing != null;
   bool get _isTodo => _type == HabitType.todo;
   bool get _isBreaking => _type == HabitType.negative;
@@ -88,6 +102,7 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
       _replacementHabitId = h.replacementHabitId;
       _dueDate = h.dueDate;
       if (h.skillCategory != null) _skillCtrl.text = h.skillCategory!;
+      _foodLink = HabitFoodLink.fromRaw(h.foodLinkRaw);
     } else if (widget.initialType != null) {
       _type = widget.initialType!;
       _section = switch (_type) {
@@ -201,6 +216,18 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
         'due_date': _dueDate!.toIso8601String().split('T').first,
     };
 
+    // Only touch the `food_link` column when the feature is actually in play,
+    // so tasks that don't use it keep saving even before the DB migration is
+    // applied. Send an explicit null only to *clear* a link the task used to
+    // have (toggled off on edit).
+    final hasLink = !_isBreaking && _foodLink != null && _foodLink!.isNotEmpty;
+    final hadLink = widget.existing?.foodLinkRaw != null;
+    if (hasLink) {
+      payload['food_link'] = _foodLink!.toJson();
+    } else if (hadLink) {
+      payload['food_link'] = null;
+    }
+
     try {
       String habitId;
       if (_isEditing) {
@@ -215,20 +242,14 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
             .addHabit(payload);
       }
 
-      // Schedule / cancel local notification.
-      await NotificationService.instance.cancelHabit(habitId);
-      if (_reminderEnabled && _reminderTime != null) {
-        await NotificationService.instance.scheduleHabitReminder(
-          habitId: habitId,
-          name: _nameCtrl.text.trim(),
-          time: (hour: _reminderTime!.hour, minute: _reminderTime!.minute),
-          daysOfWeek: daysToSave,
-        );
-      }
+      // The OS reminder schedule is reconciled centrally: saving invalidates
+      // habitsProvider, which reminderRunnerProvider listens to and reconciles
+      // (honoring the master switch, the Habits category toggle, and quiet
+      // hours). See ReminderScheduler.reconcile.
 
       if (mounted) context.pop();
     } catch (e) {
-      _toast(e.toString(), isError: true);
+      _toast(friendlyError(e), isError: true);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -406,8 +427,8 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
                   selected: _timePeriod,
                   accent: _accent,
                   onChanged: (p) => setState(() {
-                    _timePeriod = (_timePeriod == p) ? null : p;
-                    if (_timePeriod == null) _scheduledTime = null;
+                    _timePeriod = p;
+                    if (p == null) _scheduledTime = null;
                   }),
                 ),
                 if (_timePeriod != null) ...[
@@ -481,22 +502,57 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
                 label: 'Effort rating',
                 sub: 'Rate how hard it felt (1–5)',
                 value: _effortRating,
+                accent: _accent,
                 onChanged: (v) => setState(() => _effortRating = v),
               ),
               _ToggleRow(
                 label: 'Note',
                 sub: 'Add a quick note when logging',
                 value: _note,
+                accent: _accent,
                 onChanged: (v) => setState(() => _note = v),
               ),
               _ToggleRow(
                 label: 'Photo proof',
                 sub: 'Attach a photo to complete',
                 value: _photoProof,
+                accent: _accent,
                 onChanged: (v) => setState(() => _photoProof = v),
               ),
             ],
           ),
+
+          // ─── Auto-log food ────────────────────────────────────
+          if (!_isBreaking)
+            _BentoSection(
+              title: 'Auto-log food',
+              subtitle: 'Log food to your diary when you complete this',
+              children: [
+                _ToggleRow(
+                  label: 'Log food when done',
+                  sub: _foodLink == null
+                      ? 'Off'
+                      : '${_foodLink!.items.length} '
+                          'food${_foodLink!.items.length == 1 ? '' : 's'} · '
+                          '${_foodLink!.slot.label}',
+                  value: _foodLink != null,
+                  accent: _accent,
+                  onChanged: _toggleFoodLink,
+                ),
+                if (_foodLink != null) ...[
+                  const SizedBox(height: 12),
+                  _FoodLinkEditor(
+                    link: _foodLink!,
+                    accent: _accent,
+                    busy: _addingFood,
+                    onSlotChanged: (s) => setState(
+                        () => _foodLink = _foodLink!.copyWith(slot: s)),
+                    onAddItem: _addFoodItem,
+                    onRemoveItem: _removeFoodItem,
+                  ),
+                ],
+              ],
+            ),
 
           // ─── Advanced ─────────────────────────────────────────
           _AdvancedHeader(
@@ -514,6 +570,7 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
                       ? 'Daily at ${_reminderTime!.format(context)}'
                       : 'Off',
                   value: _reminderEnabled,
+                  accent: _accent,
                   onChanged: (v) async {
                     setState(() => _reminderEnabled = v);
                     if (v && _reminderTime == null) {
@@ -568,24 +625,13 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
               ),
             if (_isEditing) ...[
               const SizedBox(height: 6),
-              OutlinedButton.icon(
+              AtlasButton(
+                label: 'Archive habit',
+                icon: LucideIcons.trash2,
+                variant: AtlasButtonVariant.tonal,
+                color: c.negative,
+                height: 50,
                 onPressed: _confirmDelete,
-                icon: Icon(LucideIcons.trash2, size: 16, color: c.negative),
-                label: Text(
-                  'Archive habit',
-                  style: TextStyle(
-                    fontFamily: 'Inter',
-                    color: c.negative,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                style: OutlinedButton.styleFrom(
-                  side: BorderSide(color: c.negative.withValues(alpha: 0.4)),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(AppRadii.button),
-                  ),
-                ),
               ),
             ],
           ],
@@ -659,6 +705,60 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
     }
   }
 
+  // ── Food link ────────────────────────────────────────────────────────
+
+  void _toggleFoodLink(bool on) {
+    setState(() => _foodLink = on ? (_foodLink ?? HabitFoodLink.empty) : null);
+  }
+
+  Future<void> _addFoodItem() async {
+    final selection = await showModalBottomSheet<FoodSelection>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      useSafeArea: true,
+      builder: (_) => FoodSearchSheet(
+        slot: _foodLink?.slot ?? MealTimeSlot.snack,
+        date: DateTime.now(),
+        selectMode: true,
+      ),
+    );
+    if (selection == null || !mounted) return;
+
+    // Resolve a real food_id (best-effort) so the auto-logged entry still feeds
+    // Recents / frequent-food ranking.
+    setState(() => _addingFood = true);
+    String? foodId;
+    try {
+      foodId = await ref.read(foodRepositoryProvider).ensureFoodId(selection.food);
+    } catch (_) {
+      foodId = null;
+    }
+    if (!mounted) return;
+
+    final item = HabitFoodLinkItem(
+      foodId: foodId,
+      name: selection.food.displayLine,
+      qty: selection.qty,
+      unit: selection.unit,
+      totals: selection.totals,
+    );
+    setState(() {
+      final link = _foodLink ?? HabitFoodLink.empty;
+      _foodLink = link.copyWith(items: [...link.items, item]);
+      _addingFood = false;
+    });
+  }
+
+  void _removeFoodItem(int index) {
+    final link = _foodLink;
+    if (link == null) return;
+    setState(() {
+      final items = [...link.items]..removeAt(index);
+      _foodLink = link.copyWith(items: items);
+    });
+  }
+
   Future<void> _confirmDelete() async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -699,1118 +799,5 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
       await NotificationService.instance.cancelHabit(widget.existing!.id);
       if (mounted) context.pop();
     }
-  }
-}
-
-// ─────────────────────────────── pieces ───────────────────────────────
-
-/// Titled BENTO container. Wraps a logical group of inputs in the same
-/// surface + 0.5px border + soft-shadow card style used on the home screen.
-class _BentoSection extends StatelessWidget {
-  final String title;
-  final String? subtitle;
-  final List<Widget> children;
-  const _BentoSection({
-    required this.title,
-    this.subtitle,
-    required this.children,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-      decoration: BoxDecoration(
-        color: c.surface,
-        borderRadius: BorderRadius.circular(AppRadii.card),
-        border: Border.all(color: c.border, width: 0.5),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 9,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            title.toUpperCase(),
-            style: TextStyle(
-              fontFamily: 'Inter',
-              fontSize: 10.5,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1.4,
-              color: c.textMuted,
-              height: 1.0,
-            ),
-          ),
-          if (subtitle != null) ...[
-            const SizedBox(height: 4),
-            Text(
-              subtitle!,
-              style: TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 12,
-                fontWeight: FontWeight.w500,
-                color: c.textSecondary,
-                height: 1.3,
-              ),
-            ),
-          ],
-          const SizedBox(height: 14),
-          ...children,
-        ],
-      ),
-    );
-  }
-}
-
-/// Single-line TextField wrapped in the BENTO input style: 56dp height,
-/// `surfaceElevated` fill, 0.5px border, accent on focus. Matches home cards.
-class _BentoField extends StatefulWidget {
-  final TextEditingController controller;
-  final String hint;
-  final String? suffix;
-  final TextInputType? keyboard;
-  final bool autofocus;
-  const _BentoField({
-    required this.controller,
-    required this.hint,
-    this.suffix,
-    this.keyboard,
-    this.autofocus = false,
-  });
-
-  @override
-  State<_BentoField> createState() => _BentoFieldState();
-}
-
-class _BentoFieldState extends State<_BentoField> {
-  final _focus = FocusNode();
-
-  @override
-  void initState() {
-    super.initState();
-    _focus.addListener(() => setState(() {}));
-  }
-
-  @override
-  void dispose() {
-    _focus.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    final focused = _focus.hasFocus;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
-      decoration: BoxDecoration(
-        color: c.surfaceElevated,
-        borderRadius: BorderRadius.circular(AppRadii.chip),
-        border: Border.all(
-          color: focused ? c.accent.withValues(alpha: 0.55) : c.border,
-          width: focused ? 1 : 0.5,
-        ),
-      ),
-      child: TextField(
-        controller: widget.controller,
-        focusNode: _focus,
-        autofocus: widget.autofocus,
-        keyboardType: widget.keyboard,
-        style: TextStyle(
-          fontFamily: 'Inter',
-          fontSize: 14,
-          fontWeight: FontWeight.w500,
-          color: c.textPrimary,
-        ),
-        decoration: InputDecoration(
-          isCollapsed: false,
-          isDense: true,
-          contentPadding: const EdgeInsets.symmetric(vertical: 14),
-          border: InputBorder.none,
-          enabledBorder: InputBorder.none,
-          focusedBorder: InputBorder.none,
-          hintText: widget.hint,
-          hintStyle: TextStyle(
-            fontFamily: 'Inter',
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-            color: c.textMuted,
-          ),
-          suffixText: widget.suffix,
-          suffixStyle: TextStyle(
-            fontFamily: 'Inter',
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: c.textMuted,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _Label extends StatelessWidget {
-  final String text;
-  const _Label(this.text);
-  @override
-  Widget build(BuildContext context) => Text(text, style: context.t.label);
-}
-
-class _SectionRow extends StatelessWidget {
-  final HabitSection selected;
-  final ValueChanged<HabitSection> onChanged;
-  const _SectionRow({required this.selected, required this.onChanged});
-
-  Color _color(AppPalette c, HabitSection s) => switch (s) {
-        HabitSection.athletic => c.athletic,
-        HabitSection.body => c.body,
-        HabitSection.mind => c.mind,
-      };
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    return Row(
-      children: HabitSection.values.map((s) {
-        final active = s == selected;
-        final sc = _color(c, s);
-        return Expanded(
-          child: GestureDetector(
-            onTap: () {
-              HapticFeedback.selectionClick();
-              onChanged(s);
-            },
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              margin: const EdgeInsets.only(right: 8),
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              decoration: BoxDecoration(
-                color: active ? sc.withValues(alpha: 0.10) : c.surface,
-                borderRadius: BorderRadius.circular(AppRadii.button),
-                border: Border.all(color: active ? sc : c.border),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                s.name[0].toUpperCase() + s.name.substring(1),
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  fontSize: 13,
-                  fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-                  color: active ? sc : c.textMuted,
-                ),
-              ),
-            ),
-          ),
-        );
-      }).toList(),
-    );
-  }
-}
-
-class _PriorityRow extends StatelessWidget {
-  final HabitPriority selected;
-  final ValueChanged<HabitPriority> onChanged;
-  const _PriorityRow({required this.selected, required this.onChanged});
-
-  Color _color(AppPalette c, HabitPriority p) => switch (p) {
-        HabitPriority.low => c.textMuted,
-        HabitPriority.normal => c.accent,
-        HabitPriority.high => c.amber,
-        HabitPriority.critical => c.negative,
-      };
-
-  String _label(HabitPriority p) => switch (p) {
-        HabitPriority.low => 'Low',
-        HabitPriority.normal => 'Normal',
-        HabitPriority.high => 'High',
-        HabitPriority.critical => 'Critical',
-      };
-
-  String _multiplier(HabitPriority p) => switch (p) {
-        HabitPriority.low => '0.5×',
-        HabitPriority.normal => '1×',
-        HabitPriority.high => '1.5×',
-        HabitPriority.critical => '2.5×',
-      };
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    return Row(
-      children: HabitPriority.values.map((p) {
-        final active = p == selected;
-        final pc = _color(c, p);
-        return Expanded(
-          child: GestureDetector(
-            onTap: () {
-              HapticFeedback.selectionClick();
-              onChanged(p);
-            },
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              margin: const EdgeInsets.only(right: 6),
-              padding: const EdgeInsets.symmetric(vertical: 9),
-              decoration: BoxDecoration(
-                color: active ? pc.withValues(alpha: 0.12) : c.surface,
-                borderRadius: BorderRadius.circular(AppRadii.button),
-                border: Border.all(color: active ? pc : c.border),
-              ),
-              alignment: Alignment.center,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _label(p),
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 12,
-                      fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                      color: active ? pc : c.textMuted,
-                      height: 1.1,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    _multiplier(p),
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 9.5,
-                      fontWeight: FontWeight.w600,
-                      color: active ? pc.withValues(alpha: 0.85) : c.textMuted,
-                      height: 1.0,
-                      fontFeatures: const [FontFeature.tabularFigures()],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      }).toList(),
-    );
-  }
-}
-
-class _FreqRow extends StatelessWidget {
-  final FrequencyMode selected;
-  final Color accent;
-  final ValueChanged<FrequencyMode> onChanged;
-  const _FreqRow({
-    required this.selected,
-    required this.accent,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    const opts = [
-      (FrequencyMode.everyDay, 'Every day'),
-      (FrequencyMode.specificDays, 'Specific days'),
-      (FrequencyMode.timesPerWeek, 'X / week'),
-    ];
-    return Row(
-      children: opts.map((o) {
-        final active = o.$1 == selected;
-        return Expanded(
-          child: GestureDetector(
-            onTap: () {
-              HapticFeedback.selectionClick();
-              onChanged(o.$1);
-            },
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              margin: const EdgeInsets.only(right: 8),
-              padding: const EdgeInsets.symmetric(vertical: 11),
-              decoration: BoxDecoration(
-                color: active ? accent.withValues(alpha: 0.10) : c.surface,
-                borderRadius: BorderRadius.circular(AppRadii.button),
-                border: Border.all(color: active ? accent : c.border),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                o.$2,
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  fontSize: 12,
-                  fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-                  color: active ? accent : c.textMuted,
-                ),
-              ),
-            ),
-          ),
-        );
-      }).toList(),
-    );
-  }
-}
-
-class _DaysRow extends StatelessWidget {
-  final List<int> selected;
-  final Color accent;
-  final ValueChanged<int> onToggle;
-  const _DaysRow({
-    required this.selected,
-    required this.accent,
-    required this.onToggle,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    return Row(
-      children: List.generate(7, (i) {
-        final d = i + 1;
-        final active = selected.contains(d);
-        return Expanded(
-          child: GestureDetector(
-            onTap: () {
-              HapticFeedback.selectionClick();
-              onToggle(d);
-            },
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              margin: const EdgeInsets.only(right: 4),
-              height: 36,
-              decoration: BoxDecoration(
-                color: active ? accent.withValues(alpha: 0.12) : c.surface,
-                borderRadius: BorderRadius.circular(AppRadii.chip),
-                border: Border.all(color: active ? accent : c.border),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                _dayLabels[i],
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: active ? accent : c.textMuted,
-                ),
-              ),
-            ),
-          ),
-        );
-      }),
-    );
-  }
-}
-
-class _WhenRow extends StatelessWidget {
-  final TimePeriod? selected;
-  final Color accent;
-  final ValueChanged<TimePeriod> onChanged;
-  const _WhenRow({
-    required this.selected,
-    required this.accent,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    final opts = [
-      (TimePeriod.morning, LucideIcons.sunrise, 'Morning'),
-      (TimePeriod.afternoon, LucideIcons.sun, 'Afternoon'),
-      (TimePeriod.evening, LucideIcons.moon, 'Evening'),
-    ];
-    return Row(
-      children: [
-        // Anytime tile
-        Expanded(
-          child: GestureDetector(
-            onTap: () {
-              HapticFeedback.selectionClick();
-              if (selected != null) onChanged(selected!);
-            },
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              margin: const EdgeInsets.only(right: 8),
-              padding: const EdgeInsets.symmetric(vertical: 11),
-              decoration: BoxDecoration(
-                color: selected == null
-                    ? accent.withValues(alpha: 0.10)
-                    : c.surface,
-                borderRadius: BorderRadius.circular(AppRadii.button),
-                border: Border.all(
-                    color: selected == null ? accent : c.border),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                'Anytime',
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  fontSize: 12,
-                  fontWeight: selected == null
-                      ? FontWeight.w600
-                      : FontWeight.w500,
-                  color: selected == null ? accent : c.textMuted,
-                ),
-              ),
-            ),
-          ),
-        ),
-        ...opts.map((o) {
-          final active = o.$1 == selected;
-          return Expanded(
-            child: GestureDetector(
-              onTap: () {
-                HapticFeedback.selectionClick();
-                onChanged(o.$1);
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                margin: const EdgeInsets.only(right: 8),
-                padding: const EdgeInsets.symmetric(vertical: 11),
-                decoration: BoxDecoration(
-                  color: active ? accent.withValues(alpha: 0.10) : c.surface,
-                  borderRadius: BorderRadius.circular(AppRadii.button),
-                  border: Border.all(color: active ? accent : c.border),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(o.$2,
-                        size: 14, color: active ? accent : c.textMuted),
-                    const SizedBox(width: 6),
-                    Text(
-                      o.$3,
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 12,
-                        fontWeight:
-                            active ? FontWeight.w600 : FontWeight.w500,
-                        color: active ? accent : c.textMuted,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          );
-        }),
-      ],
-    );
-  }
-}
-
-class _EndRow extends StatelessWidget {
-  final EndMode selected;
-  final Color accent;
-  final ValueChanged<EndMode> onChanged;
-  const _EndRow({
-    required this.selected,
-    required this.accent,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    const opts = [
-      (EndMode.off, 'Off'),
-      (EndMode.date, 'On date'),
-      (EndMode.afterDays, 'After N days'),
-    ];
-    return Row(
-      children: opts.map((o) {
-        final active = o.$1 == selected;
-        return Expanded(
-          child: GestureDetector(
-            onTap: () {
-              HapticFeedback.selectionClick();
-              onChanged(o.$1);
-            },
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              margin: const EdgeInsets.only(right: 8),
-              padding: const EdgeInsets.symmetric(vertical: 11),
-              decoration: BoxDecoration(
-                color: active ? accent.withValues(alpha: 0.10) : c.surface,
-                borderRadius: BorderRadius.circular(AppRadii.button),
-                border: Border.all(color: active ? accent : c.border),
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                o.$2,
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  fontSize: 12,
-                  fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-                  color: active ? accent : c.textMuted,
-                ),
-              ),
-            ),
-          ),
-        );
-      }).toList(),
-    );
-  }
-}
-
-class _PickerRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Widget? trailing;
-  final Color accent;
-  final VoidCallback onTap;
-  const _PickerRow({
-    required this.icon,
-    required this.label,
-    required this.accent,
-    required this.onTap,
-    this.trailing,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    return InkWell(
-      borderRadius: BorderRadius.circular(AppRadii.card),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        decoration: BoxDecoration(
-          color: c.surface,
-          borderRadius: BorderRadius.circular(AppRadii.card),
-          border: Border.all(color: c.border),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 16, color: accent),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(label, style: context.t.body),
-            ),
-            if (trailing != null) trailing!,
-            if (trailing == null)
-              Icon(LucideIcons.chevronRight, size: 16, color: c.textMuted),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _IconPicker extends StatefulWidget {
-  final String selected;
-  final Color tint;
-  final ValueChanged<String> onSelect;
-  const _IconPicker({
-    required this.selected,
-    required this.tint,
-    required this.onSelect,
-  });
-
-  @override
-  State<_IconPicker> createState() => _IconPickerState();
-}
-
-class _IconPickerState extends State<_IconPicker> {
-  String _category = 'Athletic';
-
-  @override
-  void initState() {
-    super.initState();
-    // Open on the category containing the current icon.
-    for (final entry in kHabitIconCategories.entries) {
-      if (entry.value.contains(widget.selected)) {
-        _category = entry.key;
-        break;
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    final icons = kHabitIconCategories[_category] ?? const <String>[];
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: c.surface,
-        borderRadius: BorderRadius.circular(AppRadii.card),
-        border: Border.all(color: c.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: kHabitIconCategories.keys.map((cat) {
-                final active = cat == _category;
-                return GestureDetector(
-                  onTap: () => setState(() => _category = cat),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    margin: const EdgeInsets.only(right: 8),
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: active
-                          ? widget.tint.withValues(alpha: 0.12)
-                          : c.surfaceElevated,
-                      borderRadius: BorderRadius.circular(AppRadii.chip),
-                      border: Border.all(
-                        color: active ? widget.tint : c.border,
-                      ),
-                    ),
-                    child: Text(
-                      cat,
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: active ? widget.tint : c.textMuted,
-                      ),
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: icons.map((k) {
-              final active = k == widget.selected;
-              return GestureDetector(
-                onTap: () {
-                  HapticFeedback.selectionClick();
-                  widget.onSelect(k);
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 120),
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: active
-                        ? widget.tint.withValues(alpha: 0.12)
-                        : c.surfaceElevated,
-                    borderRadius: BorderRadius.circular(AppRadii.chip),
-                    border: Border.all(
-                      color: active ? widget.tint : c.border,
-                    ),
-                  ),
-                  child: Icon(
-                    habitIcon(k),
-                    size: 18,
-                    color: active ? widget.tint : c.textSecondary,
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ColorSwatchRow extends StatelessWidget {
-  final String selected;
-  final ValueChanged<String> onSelect;
-  const _ColorSwatchRow({required this.selected, required this.onSelect});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    return Wrap(
-      spacing: 10,
-      runSpacing: 10,
-      children: kHabitColorOrder.map((k) {
-        final color = Color(kHabitColorSwatch[k]!);
-        final active = k == selected;
-        return GestureDetector(
-          onTap: () {
-            HapticFeedback.selectionClick();
-            onSelect(k);
-          },
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: active ? c.textPrimary : Colors.transparent,
-                width: 2,
-              ),
-            ),
-            child: active
-                ? Icon(LucideIcons.check, size: 14, color: c.onAccent)
-                : null,
-          ),
-        );
-      }).toList(),
-    );
-  }
-}
-
-class _ToggleRow extends StatelessWidget {
-  final String label;
-  final String sub;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-  const _ToggleRow({
-    required this.label,
-    required this.sub,
-    required this.value,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    final t = context.t;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: t.bodyStrong),
-                Text(sub, style: t.meta),
-              ],
-            ),
-          ),
-          Switch(
-            value: value,
-            onChanged: onChanged,
-            activeThumbColor: c.accent,
-            activeTrackColor: c.accent.withValues(alpha: 0.35),
-            inactiveTrackColor: c.borderStrong,
-            inactiveThumbColor: c.textDim,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AdvancedHeader extends StatelessWidget {
-  final bool open;
-  final VoidCallback onToggle;
-  const _AdvancedHeader({required this.open, required this.onToggle});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    return InkWell(
-      borderRadius: BorderRadius.circular(AppRadii.card),
-      onTap: onToggle,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(
-          children: [
-            Text(
-              'Advanced',
-              style: TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: c.textPrimary,
-              ),
-            ),
-            const Spacer(),
-            AnimatedRotation(
-              turns: open ? 0.5 : 0,
-              duration: const Duration(milliseconds: 180),
-              child: Icon(LucideIcons.chevronDown, size: 18, color: c.textMuted),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ReplacementPicker extends ConsumerWidget {
-  final String? selectedId;
-  final Color accent;
-  final ValueChanged<String?> onChanged;
-  const _ReplacementPicker({
-    required this.selectedId,
-    required this.accent,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final c = context.c;
-    final habits = ref.watch(habitsProvider).valueOrNull ?? const [];
-    final builders = habits
-        .where((h) => h.section == HabitSection.mind && !h.isArchived)
-        .toList();
-
-    if (builders.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: c.surface,
-          borderRadius: BorderRadius.circular(AppRadii.card),
-          border: Border.all(color: c.border),
-        ),
-        child: Text(
-          'No Building habits yet — create one to use as a replacement.',
-          style: context.t.body.copyWith(color: c.textMuted),
-        ),
-      );
-    }
-
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: [
-        for (final h in builders)
-          GestureDetector(
-            onTap: () => onChanged(selectedId == h.id ? null : h.id),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 120),
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: selectedId == h.id
-                    ? accent.withValues(alpha: 0.12)
-                    : c.surface,
-                borderRadius: BorderRadius.circular(AppRadii.chip),
-                border: Border.all(
-                  color: selectedId == h.id ? accent : c.border,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(habitIcon(h.icon),
-                      size: 14,
-                      color: selectedId == h.id ? accent : c.textMuted),
-                  const SizedBox(width: 6),
-                  Text(
-                    h.name,
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: selectedId == h.id ? accent : c.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-      ],
-    );
-  }
-}
-
-// ───────────────────── Goal sheet ─────────────────────
-
-class _GoalSheet extends StatefulWidget {
-  final GoalType? initialType;
-  final String initialValue;
-  final Color accent;
-  const _GoalSheet({
-    required this.initialType,
-    required this.initialValue,
-    required this.accent,
-  });
-
-  @override
-  State<_GoalSheet> createState() => _GoalSheetState();
-}
-
-class _GoalSheetState extends State<_GoalSheet> {
-  late GoalType? _type;
-  late final TextEditingController _ctrl;
-
-  @override
-  void initState() {
-    super.initState();
-    _type = widget.initialType;
-    _ctrl = TextEditingController(text: widget.initialValue);
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  String _label(GoalType g) => switch (g) {
-        GoalType.reps => 'Count',
-        GoalType.durationMin => 'Duration (min)',
-        GoalType.distanceKm => 'Distance (km)',
-        GoalType.litres => 'Volume (L)',
-        GoalType.custom => 'Custom',
-      };
-
-  IconData _icon(GoalType g) => switch (g) {
-        GoalType.reps => LucideIcons.hash,
-        GoalType.durationMin => LucideIcons.clock,
-        GoalType.distanceKm => LucideIcons.mapPin,
-        GoalType.litres => LucideIcons.droplet,
-        GoalType.custom => LucideIcons.target,
-      };
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    final t = context.t;
-    return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-      ),
-      child: Container(
-        decoration: BoxDecoration(
-          color: c.surface,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          border: Border(top: BorderSide(color: c.border)),
-        ),
-        padding: EdgeInsets.fromLTRB(
-          AppSpace.screenH,
-          14,
-          AppSpace.screenH,
-          MediaQuery.of(context).viewPadding.bottom + 18,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: c.border,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text('Daily goal', style: t.h2),
-            const SizedBox(height: 10),
-            // Off + type tiles
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _TypeChip(
-                  label: 'Off',
-                  icon: LucideIcons.ban,
-                  active: _type == null,
-                  accent: widget.accent,
-                  onTap: () => setState(() => _type = null),
-                ),
-                for (final g in GoalType.values)
-                  _TypeChip(
-                    label: _label(g),
-                    icon: _icon(g),
-                    active: _type == g,
-                    accent: widget.accent,
-                    onTap: () => setState(() => _type = g),
-                  ),
-              ],
-            ),
-            if (_type != null) ...[
-              const SizedBox(height: 16),
-              TextField(
-                controller: _ctrl,
-                keyboardType: TextInputType.number,
-                autofocus: true,
-                style: t.body,
-                decoration: InputDecoration(
-                  hintText: 'Target ${_label(_type!).toLowerCase()}',
-                ),
-              ),
-            ],
-            const SizedBox(height: 16),
-            FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: widget.accent,
-                foregroundColor: c.onAccent,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(AppRadii.button),
-                ),
-              ),
-              onPressed: () => Navigator.pop(
-                context,
-                (type: _type, value: _ctrl.text.trim()),
-              ),
-              child: const Text(
-                'Save',
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  fontWeight: FontWeight.w600,
-                  fontSize: 14,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _TypeChip extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final bool active;
-  final Color accent;
-  final VoidCallback onTap;
-  const _TypeChip({
-    required this.label,
-    required this.icon,
-    required this.active,
-    required this.accent,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.selectionClick();
-        onTap();
-      },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: active ? accent.withValues(alpha: 0.12) : c.surfaceElevated,
-          borderRadius: BorderRadius.circular(AppRadii.chip),
-          border: Border.all(color: active ? accent : c.border),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 14, color: active ? accent : c.textMuted),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: active ? accent : c.textSecondary,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }

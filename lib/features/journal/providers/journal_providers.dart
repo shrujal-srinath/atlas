@@ -1,5 +1,4 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../auth/providers/auth_provider.dart';
 import '../../habits/providers/habit_provider.dart';
 import '../data/journal_repository.dart';
 import '../domain/journal_entry.dart';
@@ -11,13 +10,6 @@ final journalRepositoryProvider =
 final journalForSelectedDateProvider =
     FutureProvider.autoDispose<JournalEntry?>((ref) async {
   final date = ref.watch(selectedDateProvider);
-  final repo = ref.watch(journalRepositoryProvider);
-  return repo.getForDate(date);
-});
-
-/// Entry for an arbitrary date (used by the editor sheet).
-final journalForDateProvider =
-    FutureProvider.autoDispose.family<JournalEntry?, DateTime>((ref, date) async {
   final repo = ref.watch(journalRepositoryProvider);
   return repo.getForDate(date);
 });
@@ -48,16 +40,28 @@ final needsNightReviewProvider = Provider.autoDispose<bool>((ref) {
   return (entry?.nightReview ?? '').trim().isEmpty;
 });
 
-/// Empty stub used when no entry yet — backed by current user id.
-JournalEntry emptyEntryFor({required String userId, required DateTime date}) =>
-    JournalEntry.empty(userId, date);
+String _dayKey(DateTime d) => '${d.year}-${d.month}-${d.day}';
 
-/// Convenience: today's entry-or-empty for the current user.
-final todayOrEmptyJournalProvider = Provider.autoDispose<JournalEntry?>((ref) {
-  final user = ref.watch(appUserProvider).valueOrNull;
-  final date = ref.watch(selectedDateProvider);
-  final existing = ref.watch(journalForSelectedDateProvider).valueOrNull;
-  if (existing != null) return existing;
-  if (user == null) return null;
-  return emptyEntryFor(userId: user.id, date: date);
+/// Consecutive days (ending today, or yesterday as grace) with a non-empty
+/// journal entry — the journaling streak. Capped by the 30-day window.
+final journalingStreakProvider = Provider.autoDispose<int>((ref) {
+  final entries = ref.watch(journalLast30Provider).valueOrNull ?? const [];
+  final days = <String>{
+    for (final e in entries)
+      if (e.hasContent) _dayKey(e.date),
+  };
+  if (days.isEmpty) return 0;
+  final now = DateTime.now();
+  var cursor = DateTime(now.year, now.month, now.day);
+  // Grace: if today has nothing yet, the streak counts back from yesterday.
+  if (!days.contains(_dayKey(cursor))) {
+    cursor = cursor.subtract(const Duration(days: 1));
+    if (!days.contains(_dayKey(cursor))) return 0;
+  }
+  var streak = 0;
+  while (days.contains(_dayKey(cursor))) {
+    streak++;
+    cursor = cursor.subtract(const Duration(days: 1));
+  }
+  return streak;
 });

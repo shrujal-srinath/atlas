@@ -23,3 +23,38 @@ int calculateStreak(Habit habit, List<HabitLog> recentLogs) {
 
   return streak;
 }
+
+/// Canonical *daily-score* streak: consecutive days at/above [breakEven] score
+/// (the leveling break-even, 50), walking back from [today].
+///
+/// - Days absent from [scoreByDate] — no scheduled tasks / no data — are
+///   skipped: a rest day neither extends nor breaks the run (mirrors the
+///   non-scheduled-day skip in [calculateStreak]).
+/// - Today is allowed to be below break-even without breaking the streak (the
+///   day is still in progress); it only *extends* the run once it clears
+///   break-even.
+///
+/// Keys in [scoreByDate] must be date-only `DateTime(y, m, d)` values.
+int dailyScoreStreak(
+  Map<DateTime, int> scoreByDate, {
+  DateTime? today,
+  int breakEven = 50,
+  int maxLookback = 400,
+}) {
+  final now = today ?? DateTime.now();
+  var day = DateTime(now.year, now.month, now.day);
+  int streak = 0;
+  for (int i = 0; i < maxLookback; i++) {
+    final score = scoreByDate[DateTime(day.year, day.month, day.day)];
+    if (score == null) {
+      // Rest / no-data day — skip without breaking.
+    } else if (score >= breakEven) {
+      streak++;
+    } else if (i != 0) {
+      // A past day below break-even ends the run. Today (i == 0) gets grace.
+      break;
+    }
+    day = day.subtract(const Duration(days: 1));
+  }
+  return streak;
+}

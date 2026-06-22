@@ -119,25 +119,40 @@ class _ToastBodyState extends State<_ToastBody> with TickerProviderStateMixin {
                       children: [
                         Row(
                           children: [
-                            Text('+ ${widget.delta.kcal.round()} kcal',
-                                style: AppType.numMd.copyWith(color: c.textPrimary)),
+                            // Hide the "+ 0 kcal" prefix for non-food deltas
+                            // (e.g. water, quick chips) where the slot label
+                            // already carries the meaningful message.
+                            if (widget.delta.kcal > 0)
+                              Text('+ ${widget.delta.kcal.round()} kcal',
+                                  style: AppType.numMd.copyWith(color: c.textPrimary)),
                             if (widget.slotLabel != null) ...[
-                              const SizedBox(width: 8),
-                              Text('· ${widget.slotLabel!.toUpperCase()}',
-                                  style: AppType.overline.copyWith(color: c.textMuted)),
+                              if (widget.delta.kcal > 0)
+                                const SizedBox(width: 8),
+                              Text(
+                                widget.delta.kcal > 0
+                                    ? '· ${widget.slotLabel!.toUpperCase()}'
+                                    : widget.slotLabel!.toUpperCase(),
+                                style: AppType.numMd.copyWith(
+                                  color: widget.delta.kcal > 0
+                                      ? c.textMuted
+                                      : c.textPrimary,
+                                ),
+                              ),
                             ],
                           ],
                         ),
-                        const SizedBox(height: 3),
-                        Row(
-                          children: [
-                            _macro('P', widget.delta.proteinG, c.athletic),
-                            const SizedBox(width: 10),
-                            _macro('C', widget.delta.carbsG, c.amber),
-                            const SizedBox(width: 10),
-                            _macro('F', widget.delta.fatG, c.mind),
-                          ],
-                        ),
+                        if (widget.delta.kcal > 0) ...[
+                          const SizedBox(height: 3),
+                          Row(
+                            children: [
+                              _macro('P', widget.delta.proteinG, c.athletic),
+                              const SizedBox(width: 10),
+                              _macro('C', widget.delta.carbsG, c.amber),
+                              const SizedBox(width: 10),
+                              _macro('F', widget.delta.fatG, c.mind),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),

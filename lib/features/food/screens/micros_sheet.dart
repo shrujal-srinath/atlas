@@ -98,7 +98,8 @@ class MicrosSheet extends StatelessWidget {
                       decoration: BoxDecoration(
                         color: c.surface,
                         borderRadius: BorderRadius.circular(AppRadii.card),
-                        border: Border.all(color: c.border),
+                        border: Border.all(color: c.border, width: 0.5),
+                        boxShadow: AppShadows.card,
                       ),
                       child: Column(
                         children: [

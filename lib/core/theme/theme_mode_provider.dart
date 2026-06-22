@@ -5,7 +5,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 const _prefsKey = 'atlas.themeMode';
 
 class ThemeModeNotifier extends StateNotifier<ThemeMode> {
-  ThemeModeNotifier() : super(ThemeMode.dark) {
+  // Light is the product default — the design is tuned for light first. A saved
+  // preference still wins once the user has explicitly chosen a mode.
+  ThemeModeNotifier() : super(ThemeMode.light) {
     _load();
   }
 

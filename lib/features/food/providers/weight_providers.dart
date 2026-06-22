@@ -12,13 +12,6 @@ final weightLogProvider =
   return repo.last(days: 90);
 });
 
-/// Latest weight entry — null if none ever logged.
-final latestWeightProvider = Provider.autoDispose<WeightEntry?>((ref) {
-  final list = ref.watch(weightLogProvider).valueOrNull ?? const [];
-  if (list.isEmpty) return null;
-  return list.last;
-});
-
 /// Weight delta over [days] vs the most recent entry. Null if not enough data.
 final weightDeltaProvider =
     Provider.autoDispose.family<double?, int>((ref, days) {

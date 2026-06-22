@@ -9,6 +9,7 @@ import '../../../shared/models/models.dart';
 import '../../food/providers/food_providers.dart';
 import '../../habits/providers/habit_provider.dart';
 import '../../journal/providers/journal_providers.dart';
+import '../../xp/leveling_providers.dart';
 import 'home_providers.dart';
 
 enum TickerTone { normal, warn, accent }
@@ -38,6 +39,7 @@ final tickerLinesProvider = Provider<List<TickerLine>>((ref) {
   final targets = ref.watch(dailyTargetsProvider);
   final needsIntent = ref.watch(needsMorningIntentProvider);
   final needsReview = ref.watch(needsNightReviewProvider);
+  final streak = ref.watch(currentScoreStreakProvider).valueOrNull ?? 0;
 
   // 1. Greeting.
   final hour = now.hour;
@@ -110,10 +112,10 @@ final tickerLinesProvider = Provider<List<TickerLine>>((ref) {
         text: 'Perfect day · keep it going',
         tone: TickerTone.accent,
       ));
-    } else if (score.streakDays > 0) {
+    } else if (streak > 0) {
       lines.add(TickerLine(
         icon: LucideIcons.flame,
-        text: '${score.streakDays}-day streak — finish strong tonight',
+        text: '$streak-day streak — finish strong tonight',
         tone: TickerTone.accent,
       ));
     }

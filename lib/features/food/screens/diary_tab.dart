@@ -10,12 +10,16 @@ import '../domain/meal_entry.dart';
 import '../domain/targets.dart';
 import '../providers/food_providers.dart';
 import '../widgets/date_strip.dart';
-import '../widgets/hero_nutrition_card.dart';
+import '../widgets/diary_nutrition_summary.dart';
 import '../widgets/log_confirmation_toast.dart';
 import '../widgets/meal_section.dart';
 import '../widgets/streak_strip.dart';
+import '../../../shared/widgets/atlas_error.dart';
+import '../../../shared/widgets/atlas_skeleton.dart';
+import 'edit_entry_sheet.dart';
 import 'food_search_sheet.dart';
 import 'goal_setting_screen.dart';
+import 'meal_picker_sheet.dart';
 import 'micros_sheet.dart';
 import 'quick_add_sheet.dart';
 import 'saved_meals_sheet.dart';
@@ -66,8 +70,7 @@ class DiaryTab extends ConsumerWidget {
                     padding: const EdgeInsets.fromLTRB(
                         AppSpace.screenH, 8, AppSpace.screenH, 100),
                     children: [
-                      HeroNutritionCard(
-                        variant: HeroVariant.diary,
+                      DiaryNutritionSummary(
                         onMicrosTap: () => _openMicros(
                             context,
                             ref.read(diaryTotalsProvider),
@@ -76,8 +79,33 @@ class DiaryTab extends ConsumerWidget {
                           MaterialPageRoute(
                               builder: (_) => const GoalSettingScreen()),
                         ),
+                        onAddMeal: () => _openMealPicker(context, ref, date),
+                        onQuickAdd: () => _openQuickAdd(context, ref, date),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 14),
+                      // Meal list — the hero of the diary.
+                      for (final slot in kDiarySlotOrder) ...[
+                        MealSection(
+                          slot: slot,
+                          date: date,
+                          entries: bySlot[slot]!,
+                          onAdd: () => _openSearch(context, ref, slot, date),
+                          onEdit: (e) => _openEdit(context, ref, e),
+                          onDelete: (e) async {
+                            final repo = ref.read(foodRepositoryProvider);
+                            await repo.deleteEntry(e.id);
+                            ref.invalidate(diaryEntriesProvider);
+                          },
+                          onCopyMeal: () => _copyMeal(
+                              context, ref, slot, date, bySlot[slot]!),
+                          onSaveAsMeal: () =>
+                              _saveAsMeal(context, ref, slot, bySlot[slot]!),
+                          onLoadSavedMeal: () =>
+                              _loadSavedMeal(context, ref, slot, date),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
+                      const SizedBox(height: 4),
                       _WaterCard(
                         ml: waterAsync.valueOrNull ?? 0,
                         targetMl: waterTarget,
@@ -93,48 +121,32 @@ class DiaryTab extends ConsumerWidget {
                           ref.invalidate(waterIntakeProvider);
                         },
                       ),
-                      const SizedBox(height: 16),
-                      for (final slot in kDiarySlotOrder) ...[
-                        MealSection(
-                          slot: slot,
-                          date: date,
-                          entries: bySlot[slot]!,
-                          onAdd: () => _openSearch(context, ref, slot, date),
-                          onDelete: (e) async {
-                            final repo = ref.read(foodRepositoryProvider);
-                            await repo.deleteEntry(e.id);
-                            ref.invalidate(diaryEntriesProvider);
-                          },
-                          onCopyMeal: () => _copyMeal(
-                              context, ref, slot, date, bySlot[slot]!),
-                          onSaveAsMeal: () =>
-                              _saveAsMeal(context, ref, slot, bySlot[slot]!),
-                          onLoadSavedMeal: () =>
-                              _loadSavedMeal(context, ref, slot, date),
-                        ),
-                        const SizedBox(height: 10),
-                      ],
                     ],
                   );
                 },
-                loading: () => const Center(
-                    child: CircularProgressIndicator(strokeWidth: 2)),
-                error: (e, _) => Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text('Failed to load diary: $e',
-                        textAlign: TextAlign.center,
-                        style: context.t.body.copyWith(color: c.negative)),
+                loading: () => Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                      AppSpace.screenH, 8, AppSpace.screenH, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: const [
+                      AtlasSkeleton.card(cardHeight: 220),
+                      SizedBox(height: 12),
+                      AtlasSkeleton.card(cardHeight: 90),
+                      SizedBox(height: 16),
+                      AtlasSkeleton.listRow(rows: 4),
+                    ],
                   ),
+                ),
+                error: (e, _) => AtlasError(
+                  error: e,
+                  title: 'Couldn\'t load diary',
+                  onRetry: () => ref.invalidate(diaryEntriesProvider),
                 ),
               ),
             ),
           ],
         ),
-      ),
-      floatingActionButton: _DualFab(
-        onLog: () => _openSearch(context, ref, MealTimeSlot.snack, date),
-        onQuickAdd: () => _openQuickAdd(context, ref, date),
       ),
     );
   }
@@ -156,6 +168,33 @@ class DiaryTab extends ConsumerWidget {
       if (logged != null && context.mounted) {
         LogConfirmationToast.show(context, logged.totals, slotLabel: slot.label);
       }
+    });
+  }
+
+  void _openMealPicker(BuildContext context, WidgetRef ref, DateTime date) {
+    showModalBottomSheet<MealTimeSlot>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.c.background,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) => const MealPickerSheet(),
+    ).then((slot) {
+      if (slot != null && context.mounted) {
+        _openSearch(context, ref, slot, date);
+      }
+    });
+  }
+
+  void _openEdit(BuildContext context, WidgetRef ref, MealEntry entry) {
+    showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: context.c.background,
+      builder: (_) => EditEntrySheet(entry: entry),
+    ).then((changed) {
+      if (changed == true) ref.invalidate(diaryEntriesProvider);
     });
   }
 
@@ -312,7 +351,8 @@ class _WaterCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: c.surface,
         borderRadius: BorderRadius.circular(AppRadii.card),
-        border: Border.all(color: c.border),
+        border: Border.all(color: c.border, width: 0.5),
+        boxShadow: AppShadows.card,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -399,43 +439,3 @@ class _WaterCard extends StatelessWidget {
   }
 }
 
-// ── Dual FAB ───────────────────────────────────────────────────
-
-class _DualFab extends StatelessWidget {
-  final VoidCallback onLog;
-  final VoidCallback onQuickAdd;
-  const _DualFab({required this.onLog, required this.onQuickAdd});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        FloatingActionButton.small(
-          heroTag: 'quickAdd',
-          backgroundColor: c.surface,
-          foregroundColor: c.accent,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.card),
-            side: BorderSide(color: c.border),
-          ),
-          onPressed: onQuickAdd,
-          child: const Icon(LucideIcons.zap, size: 18),
-        ),
-        const SizedBox(height: 10),
-        FloatingActionButton.extended(
-          heroTag: 'logFood',
-          backgroundColor: c.accent,
-          foregroundColor: c.onAccent,
-          onPressed: onLog,
-          icon: const Icon(LucideIcons.plus, size: 18),
-          label: const Text('Log food',
-              style: TextStyle(
-                  fontFamily: 'Inter', fontWeight: FontWeight.w600)),
-        ),
-      ],
-    );
-  }
-}

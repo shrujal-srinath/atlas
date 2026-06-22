@@ -111,7 +111,12 @@ class OffClient {
 
   /// Lookup by barcode.
   Future<Food?> byBarcode(String code) async {
-    final uri = Uri.parse('https://world.openfoodfacts.org/api/v0/product/$code.json');
+    final clean = code.trim();
+    if (clean.isEmpty) return null;
+    // Encode the scanned value so it can't break out of the URL path.
+    final uri = Uri.parse(
+      'https://world.openfoodfacts.org/api/v0/product/${Uri.encodeComponent(clean)}.json',
+    );
     try {
       final r = await _http.get(uri, headers: {'User-Agent': _ua})
           .timeout(const Duration(seconds: 8));

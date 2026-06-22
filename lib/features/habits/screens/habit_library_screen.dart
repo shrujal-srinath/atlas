@@ -4,10 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/error_messages.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../core/utils/streak_engine.dart';
 import '../../../shared/models/models.dart';
 import '../../../shared/services/notification_service.dart';
+import '../../../shared/widgets/atlas_empty.dart';
 import '../providers/habit_provider.dart';
 import '../widgets/habit_type_picker.dart';
 
@@ -50,7 +52,7 @@ class _HabitLibraryScreenState extends ConsumerState<HabitLibraryScreen> {
         loading: () => Center(
             child: CircularProgressIndicator(color: c.accent, strokeWidth: 2)),
         error: (e, _) => Center(
-          child: Text(e.toString(),
+          child: Text(friendlyError(e),
               style: TextStyle(color: c.negative, fontSize: 13)),
         ),
       ),
@@ -259,11 +261,7 @@ class _SectionHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     final t = context.t;
-    final color = switch (section) {
-      HabitSection.athletic => c.athletic,
-      HabitSection.body => c.body,
-      HabitSection.mind => c.mind,
-    };
+    final color = section.color(c);
     final label = section.name[0].toUpperCase() + section.name.substring(1);
     return Row(
       children: [
@@ -326,12 +324,7 @@ class _HabitRow extends ConsumerWidget {
     if (habit.colorKey != null && kHabitColorSwatch[habit.colorKey] != null) {
       return Color(kHabitColorSwatch[habit.colorKey]!);
     }
-    final c = context.c;
-    return switch (habit.section) {
-      HabitSection.athletic => c.athletic,
-      HabitSection.body => c.body,
-      HabitSection.mind => c.mind,
-    };
+    return habit.section.color(context.c);
   }
 
   @override
@@ -531,41 +524,12 @@ class _ArchivedRow extends ConsumerWidget {
 class _EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final c = context.c;
-    final t = context.t;
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.layoutList, size: 28, color: c.textDim),
-            const SizedBox(height: 12),
-            Text('No habits yet', style: t.h2),
-            const SizedBox(height: 6),
-            Text(
-              'Tap the + to create your first one.',
-              textAlign: TextAlign.center,
-              style: t.body.copyWith(color: c.textMuted),
-            ),
-            const SizedBox(height: 16),
-            FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: c.accent,
-                foregroundColor: c.onAccent,
-              ),
-              onPressed: () => showHabitTypePicker(context),
-              child: const Text(
-                'Create a habit',
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return AtlasEmpty.firstRun(
+      icon: LucideIcons.layoutList,
+      title: 'No habits yet',
+      body: 'Tap the + to create your first one.',
+      actionLabel: 'Create a habit',
+      onAction: () => showHabitTypePicker(context),
     );
   }
 }

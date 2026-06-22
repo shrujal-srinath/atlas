@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/app_snackbar.dart';
 import '../domain/food.dart';
 import '../domain/recipe.dart';
 import '../providers/food_providers.dart';
@@ -83,9 +84,7 @@ class _RecipeBuilderScreenState extends ConsumerState<RecipeBuilderScreen> {
       if (mounted) Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to save: $e')),
-      );
+      showErrorSnack(context, e);
       setState(() => _saving = false);
     }
   }
@@ -123,163 +122,282 @@ class _RecipeBuilderScreenState extends ConsumerState<RecipeBuilderScreen> {
     final c = context.c;
     final t = context.t;
     final n = _perServing;
+    final isEdit = widget.existingFood != null;
 
     return Scaffold(
       backgroundColor: c.background,
       appBar: AppBar(
         backgroundColor: c.background,
-        title: Text(
-          widget.existingFood != null ? 'Edit Recipe' : 'Create Recipe',
-          style: t.h2,
-        ),
-        actions: [
-          TextButton(
-            onPressed: _canSave ? _save : null,
-            child: _saving
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : Text('Save',
-                    style: TextStyle(
-                      color: _canSave ? c.accent : c.textDim,
-                      fontWeight: FontWeight.w600,
-                    )),
-          ),
-        ],
+        title: Text(isEdit ? 'Edit dish' : 'Create dish', style: t.h2),
+        centerTitle: true,
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(
-            AppSpace.screenH, 8, AppSpace.screenH, 100),
+      body: Column(
         children: [
-          // Name field
-          TextField(
-            controller: _nameCtrl,
-            style: t.body,
-            onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(
-              hintText: 'Recipe name',
-              prefixIcon:
-                  Icon(LucideIcons.chefHat, size: 18, color: c.textMuted),
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Servings stepper
-          Row(
-            children: [
-              Text('Servings', style: t.bodyStrong),
-              const Spacer(),
-              _StepperButton(
-                icon: LucideIcons.minus,
-                onTap: _servings > 1
-                    ? () => setState(() => _servings--)
-                    : null,
-                c: c,
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Text('$_servings',
-                    style: AppType.numLg.copyWith(color: c.textPrimary)),
-              ),
-              _StepperButton(
-                icon: LucideIcons.plus,
-                onTap: _servings < 99
-                    ? () => setState(() => _servings++)
-                    : null,
-                c: c,
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-
-          // Per-serving nutrition preview
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: c.surface,
-              borderRadius: BorderRadius.circular(AppRadii.card),
-              border: Border.all(color: c.border),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(
+                  AppSpace.screenH, 12, AppSpace.screenH, 24),
               children: [
-                Text('PER SERVING',
-                    style: AppType.overline.copyWith(color: c.textMuted)),
+                // ── Name ──────────────────────────────────────────
+                _Label('NAME'),
                 const SizedBox(height: 8),
+                TextField(
+                  controller: _nameCtrl,
+                  style: t.body,
+                  textCapitalization: TextCapitalization.sentences,
+                  onChanged: (_) => setState(() {}),
+                  decoration: InputDecoration(
+                    hintText: 'e.g. Overnight oats',
+                    hintStyle: t.body.copyWith(color: c.textDim),
+                    prefixIcon:
+                        Icon(LucideIcons.chefHat, size: 18, color: c.textMuted),
+                    filled: true,
+                    fillColor: c.surfaceElevated,
+                    isDense: true,
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppRadii.chip),
+                      borderSide: BorderSide(color: c.border, width: 0.5),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppRadii.chip),
+                      borderSide: BorderSide(color: c.border, width: 0.5),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppRadii.chip),
+                      borderSide: BorderSide(color: c.accent, width: 1),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+
+                // ── Servings + per-serving preview ────────────────
+                Container(
+                  decoration: BoxDecoration(
+                    color: c.surface,
+                    borderRadius: BorderRadius.circular(AppRadii.card),
+                    border: Border.all(color: c.border, width: 0.5),
+                    boxShadow: AppShadows.card,
+                  ),
+                  child: Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+                        child: Row(
+                          children: [
+                            Icon(LucideIcons.users, size: 16, color: c.textMuted),
+                            const SizedBox(width: 9),
+                            Text('Servings', style: t.bodyStrong),
+                            const Spacer(),
+                            _StepperButton(
+                              icon: LucideIcons.minus,
+                              onTap: _servings > 1
+                                  ? () => setState(() => _servings--)
+                                  : null,
+                              c: c,
+                            ),
+                            SizedBox(
+                              width: 44,
+                              child: Text('$_servings',
+                                  textAlign: TextAlign.center,
+                                  style: AppType.numLg
+                                      .copyWith(color: c.textPrimary)),
+                            ),
+                            _StepperButton(
+                              icon: LucideIcons.plus,
+                              onTap: _servings < 99
+                                  ? () => setState(() => _servings++)
+                                  : null,
+                              c: c,
+                            ),
+                          ],
+                        ),
+                      ),
+                      Divider(
+                          height: 1,
+                          thickness: 0.5,
+                          color: c.border,
+                          indent: 14,
+                          endIndent: 14),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('PER SERVING',
+                                style: AppType.overline
+                                    .copyWith(color: c.textMuted)),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Expanded(
+                                    child: _MacroChip(
+                                        'Kcal', n.kcal, c.textPrimary, c)),
+                                Expanded(
+                                    child: _MacroChip(
+                                        'Protein', n.proteinG, c.athletic, c)),
+                                Expanded(
+                                    child: _MacroChip(
+                                        'Carbs', n.carbsG, c.amber, c)),
+                                Expanded(
+                                    child:
+                                        _MacroChip('Fat', n.fatG, c.mind, c)),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 18),
+
+                // ── Ingredients ───────────────────────────────────
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    _MacroChip('Kcal', n.kcal, c.textPrimary, c),
-                    _MacroChip('Protein', n.proteinG, c.accent, c),
-                    _MacroChip('Carbs', n.carbsG, c.amber, c),
-                    _MacroChip('Fat', n.fatG, c.negative, c),
+                    _Label('INGREDIENTS'),
+                    const Spacer(),
+                    Text(
+                      '${_ingredients.length} ${_ingredients.length == 1 ? "item" : "items"}',
+                      style: t.meta.copyWith(color: c.textMuted),
+                    ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                _AddIngredientTile(onTap: _addIngredient),
+                if (_ingredients.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: c.surface,
+                      borderRadius: BorderRadius.circular(AppRadii.card),
+                      border: Border.all(color: c.border, width: 0.5),
+                      boxShadow: AppShadows.card,
+                    ),
+                    child: Column(
+                      children: [
+                        for (var i = 0; i < _ingredients.length; i++) ...[
+                          _IngredientRow(
+                            ingredient: _ingredients[i],
+                            onQtyChanged: (q) => _updateQty(i, q),
+                            onRemove: () => _removeIngredient(i),
+                          ),
+                          if (i < _ingredients.length - 1)
+                            Divider(
+                                height: 1,
+                                thickness: 0.5,
+                                color: c.border,
+                                indent: 12,
+                                endIndent: 12),
+                        ],
+                      ],
+                    ),
+                  ),
+                ] else ...[
+                  const SizedBox(height: 14),
+                  Center(
+                    child: Text('Add a few ingredients to build your dish.',
+                        style: t.meta.copyWith(color: c.textMuted)),
+                  ),
+                ],
               ],
             ),
           ),
-          const SizedBox(height: 20),
 
-          // Ingredients header
-          Row(
-            children: [
-              Text('INGREDIENTS',
-                  style: AppType.overline.copyWith(color: c.textMuted)),
-              const Spacer(),
-              Text('${_ingredients.length} items',
-                  style: t.meta.copyWith(color: c.textMuted)),
-            ],
-          ),
-          const SizedBox(height: 8),
-
-          // Ingredient list
-          if (_ingredients.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 24),
-              child: Center(
-                child: Text('Tap + to add ingredients',
-                    style: t.body.copyWith(color: c.textMuted)),
-              ),
-            )
-          else
-            Container(
-              decoration: BoxDecoration(
-                color: c.surface,
-                borderRadius: BorderRadius.circular(AppRadii.card),
-                border: Border.all(color: c.border),
-              ),
-              child: Column(
-                children: [
-                  for (var i = 0; i < _ingredients.length; i++) ...[
-                    _IngredientRow(
-                      ingredient: _ingredients[i],
-                      onQtyChanged: (q) => _updateQty(i, q),
-                      onRemove: () => _removeIngredient(i),
-                    ),
-                    if (i < _ingredients.length - 1)
-                      Divider(height: 1, color: c.border),
-                  ],
-                ],
-              ),
+          // ── Save bar ────────────────────────────────────────────
+          Container(
+            decoration: BoxDecoration(
+              color: c.background,
+              border: Border(top: BorderSide(color: c.border, width: 0.5)),
             ),
-          const SizedBox(height: 12),
-
-          // Add ingredient button
-          OutlinedButton.icon(
-            onPressed: _addIngredient,
-            icon: Icon(LucideIcons.plus, size: 16, color: c.accent),
-            label: Text('Add ingredient',
-                style: t.body.copyWith(color: c.accent)),
-            style: OutlinedButton.styleFrom(
-              side: BorderSide(color: c.border),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(AppRadii.card)),
-              padding: const EdgeInsets.symmetric(vertical: 14),
+            child: SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(
+                    AppSpace.screenH, 10, AppSpace.screenH, 10),
+                child: FilledButton(
+                  onPressed: _canSave ? _save : null,
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size.fromHeight(48),
+                  ),
+                  child: _saving
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : Text(isEdit ? 'Save changes' : 'Save dish',
+                          style: const TextStyle(
+                              fontFamily: 'Inter',
+                              fontWeight: FontWeight.w700)),
+                ),
+              ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ── Section label ───────────────────────────────────────────────
+
+class _Label extends StatelessWidget {
+  final String text;
+  const _Label(this.text);
+  @override
+  Widget build(BuildContext context) => Text(
+        text,
+        style: AppType.overline
+            .copyWith(color: context.c.textMuted, letterSpacing: 1.2),
+      );
+}
+
+// ── Add-ingredient tile (primary action) ────────────────────────
+
+class _AddIngredientTile extends StatelessWidget {
+  final VoidCallback onTap;
+  const _AddIngredientTile({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final t = context.t;
+    return Material(
+      color: c.accent.withValues(alpha: 0.08),
+      borderRadius: BorderRadius.circular(AppRadii.card),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadii.card),
+            border: Border.all(
+                color: c.accent.withValues(alpha: 0.35), width: 0.5),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: c.accent.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(LucideIcons.plus, size: 17, color: c.accent),
+              ),
+              const SizedBox(width: 12),
+              Text('Add ingredient',
+                  style: t.bodyStrong.copyWith(color: c.accent)),
+              const Spacer(),
+              Icon(LucideIcons.search, size: 16, color: c.accent),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -355,7 +473,7 @@ class _IngredientRowState extends State<_IngredientRow> {
             ),
           ),
           SizedBox(
-            width: 70,
+            width: 64,
             child: TextField(
               controller: _qtyCtrl,
               keyboardType:
@@ -364,11 +482,21 @@ class _IngredientRowState extends State<_IngredientRow> {
               style: AppType.numMd.copyWith(color: c.textPrimary),
               decoration: InputDecoration(
                 isDense: true,
+                filled: true,
+                fillColor: c.surfaceElevated,
                 contentPadding:
-                    const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 9),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide(color: c.border),
+                  borderSide: BorderSide(color: c.border, width: 0.5),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: c.border, width: 0.5),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: c.accent, width: 1),
                 ),
               ),
               onChanged: (v) {
@@ -377,12 +505,20 @@ class _IngredientRowState extends State<_IngredientRow> {
               },
             ),
           ),
-          const SizedBox(width: 4),
-          Text(ing.unit, style: t.meta.copyWith(color: c.textMuted)),
           const SizedBox(width: 6),
+          SizedBox(
+            width: 26,
+            child: Text(ing.unit,
+                style: t.meta.copyWith(color: c.textMuted)),
+          ),
+          const SizedBox(width: 2),
           GestureDetector(
             onTap: widget.onRemove,
-            child: Icon(LucideIcons.x, size: 16, color: c.textDim),
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.all(4),
+              child: Icon(LucideIcons.x, size: 16, color: c.textDim),
+            ),
           ),
         ],
       ),
@@ -430,11 +566,17 @@ class _MacroChip extends StatelessWidget {
         children: [
           Text(
             value >= 10 ? value.round().toString() : value.toStringAsFixed(1),
-            style: AppType.numLg.copyWith(color: color),
+            style: AppType.numMd.copyWith(
+              color: color,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              fontFeatures: const [FontFeature.tabularFigures()],
+            ),
           ),
-          const SizedBox(height: 2),
-          Text(label,
-              style: AppType.meta.copyWith(color: c.textMuted)),
+          const SizedBox(height: 3),
+          Text(label.toUpperCase(),
+              style: AppType.overline
+                  .copyWith(color: c.textMuted, fontSize: 8.5)),
         ],
       );
 }
@@ -495,8 +637,26 @@ class _IngredientSearchSheetState
                 style: t.body,
                 decoration: InputDecoration(
                   hintText: 'Search ingredient…',
+                  hintStyle: t.body.copyWith(color: c.textDim),
                   prefixIcon:
                       Icon(LucideIcons.search, size: 18, color: c.textMuted),
+                  filled: true,
+                  fillColor: c.surfaceElevated,
+                  isDense: true,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppRadii.chip),
+                    borderSide: BorderSide(color: c.border, width: 0.5),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppRadii.chip),
+                    borderSide: BorderSide(color: c.border, width: 0.5),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppRadii.chip),
+                    borderSide: BorderSide(color: c.accent, width: 1),
+                  ),
                 ),
                 onChanged: (v) {
                   ref.read(foodSearchQueryProvider.notifier).state = v;

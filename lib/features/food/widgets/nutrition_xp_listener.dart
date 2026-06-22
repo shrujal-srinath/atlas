@@ -55,15 +55,17 @@ class _NutritionXpListenerState extends ConsumerState<NutritionXpListener> {
         if (mounted) setState(() => _checked = true);
         return;
       }
+      // Dedicated flag — `bonus_xp > 0` would also be true after an
+      // achievement unlock and silently block the nutrition bonus.
       final row = await SupabaseService.client
           .from('daily_score_snapshots')
-          .select('bonus_xp')
+          .select('nutrition_bonus_awarded')
           .eq('user_id', user.id)
           .eq('date', _dateStr(_today!))
           .maybeSingle();
       if (!mounted) return;
       setState(() {
-        _awarded = row != null && ((row['bonus_xp'] as int?) ?? 0) > 0;
+        _awarded = (row?['nutrition_bonus_awarded'] as bool?) ?? false;
         _checked = true;
       });
     } catch (_) {
@@ -80,6 +82,8 @@ class _NutritionXpListenerState extends ConsumerState<NutritionXpListener> {
     await DailySnapshotWriter.addTodayBonus(
       userId: user.id,
       xp: _kNutritionBonusXp,
+      markNutritionAwarded: true,
+      nutritionRatio: ratio,
     );
     if (!mounted) return;
     ref.invalidate(cumulativeLevelXpProvider);
@@ -96,7 +100,9 @@ class _NutritionXpListenerState extends ConsumerState<NutritionXpListener> {
       Future.microtask(_loadAwardedFlag);
     }
 
-    ref.listen<double>(nutritionRatioProvider, (prev, next) {
+    // Today-pinned ratio — the diary's selected-date ratio must never fire
+    // today's bonus while the user browses an old (well-fed) day.
+    ref.listen<double>(todayNutritionRatioProvider, (prev, next) {
       // Cross detection — only fire when crossing the threshold upward.
       final crossed =
           (prev == null || prev < kNutritionXpThreshold) &&

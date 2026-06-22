@@ -21,6 +21,7 @@ dependencies:
 
   # Local cache (offline-first)
   hive_flutter: ^1.1.0
+  connectivity_plus: ^6.1.5
 
   # Charts
   fl_chart: ^0.71.0
@@ -47,11 +48,15 @@ dependencies:
   # Line icons (lucide, 1.5 stroke style)
   lucide_icons: ^0.257.0
   http: ^1.6.0
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # Release identity — generates launcher icons + native splash from assets/icon.
+  flutter_launcher_icons: ^0.14.3
+  flutter_native_splash: ^2.4.4
 
 flutter:
   uses-material-design: true
@@ -72,5 +77,27 @@ flutter:
           weight: 500
         - asset: assets/fonts/Inter-Variable.ttf
           weight: 600
-  assets:
-    - assets/food_db/
+
+# ── Release identity ────────────────────────────────────────────────────
+# Launcher icon: ruby score-ring + "A" monogram on Void-Fire black.
+# Regenerate after editing assets/icon/*: `dart run flutter_launcher_icons`.
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/icon/icon.png"
+  min_sdk_android: 21
+  remove_alpha_ios: true
+  adaptive_icon_background: "#07090E"
+  adaptive_icon_foreground: "assets/icon/icon_foreground.png"
+
+# Native splash: centered mark on the Void-Fire background, light status bar.
+# Regenerate: `dart run flutter_native_splash:create`.
+flutter_native_splash:
+  color: "#07090E"
+  image: "assets/icon/splash.png"
+  android_12:
+    color: "#07090E"
+    image: "assets/icon/splash.png"
+  android: true
+  ios: false
+  web: false

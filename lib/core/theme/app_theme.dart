@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../shared/models/models.dart';
+
 /// Single source of truth for every colour in the app.
 /// `dark` and `light` are both registered as a [ThemeExtension] on their
 /// respective [ThemeData], and widgets read them via `context.c.<token>`.
@@ -49,27 +51,31 @@ class AppPalette extends ThemeExtension<AppPalette> {
     required this.indigo,
   });
 
-  /// VOID FIRE — pitch-black scaffold, ruby red accent (design's dark mode).
+  /// OBSIDIAN — ultra-premium true-black dark mode. No blue cast: a pure-black
+  /// OLED canvas, warm-neutral charcoal surfaces stepped by tone, lifted with
+  /// light hairlines (drop shadows read as nothing on black), crisp warm-white
+  /// ink, and a single restrained ruby accent. Minimal, high-contrast, and
+  /// expensive-feeling — the old blue-grey "Void Fire" set is retired.
   static const dark = AppPalette(
-    background:      Color(0xFF07090E),
-    surface:         Color(0xFF0D1320),
-    surfaceElevated: Color(0xFF152032),
-    border:          Color(0xFF1B2640),
-    borderStrong:    Color(0xFF2B3E5A),
-    accent:          Color(0xFFE8112D),
+    background:      Color(0xFF000000), // true black (OLED)
+    surface:         Color(0xFF161513), // warm-charcoal card, lifted off black
+    surfaceElevated: Color(0xFF222120), // raised fill: inputs, tracks, chips
+    border:          Color(0x14FFFFFF), // white @ ~8% — crisp hairline edge
+    borderStrong:    Color(0x29FFFFFF), // white @ ~16%
+    accent:          Color(0xFFF0233A), // refined ruby, tuned to sit on black
     accentDim:       Color(0xFFB50022),
-    accentSoft:      Color(0x33E8112D),
+    accentSoft:      Color(0x29F0233A), // ~16% red wash — used sparingly
     onAccent:        Color(0xFFFFFFFF),
-    textPrimary:     Color(0xFFF0F4FF),
-    textSecondary:   Color(0xFF8D97AA),
-    textMuted:       Color(0xFF5E6B7D),
-    textDim:         Color(0xFF3C4858),
-    positive:        Color(0xFF22C55E),
-    negative:        Color(0xFFEF4444),
-    amber:           Color(0xFFF59E0B),
-    athletic:        Color(0xFFD2622E), // orange-rust
-    mind:            Color(0xFF3D6D94), // mind = blue
-    body:            Color(0xFF7E5A8E), // body = purple
+    textPrimary:     Color(0xFFF5F4F2), // warm near-white
+    textSecondary:   Color(0xFFA8A6A1), // warm grey
+    textMuted:       Color(0xFF787671),
+    textDim:         Color(0xFF4A4946),
+    positive:        Color(0xFF30D158),
+    negative:        Color(0xFFFF453A),
+    amber:           Color(0xFFF2B544),
+    athletic:        Color(0xFFE0743C), // warm orange
+    mind:            Color(0xFF4C9BE0), // steel blue (data accent only)
+    body:            Color(0xFFA77BD4), // muted violet
     indigo:          Color(0xFF6E5BE0),
   );
 
@@ -77,17 +83,17 @@ class AppPalette extends ThemeExtension<AppPalette> {
   static const light = AppPalette(
     background:      Color(0xFFEDE9E2), // warm linen
     surface:         Color(0xFFFFFFFF), // pure white card
-    surfaceElevated: Color(0xFFF8F5EF), // input fills, soft tile
-    border:          Color(0x141B1714), // rgba(27,23,20,.08)
-    borderStrong:    Color(0x291B1714), // rgba(27,23,20,.16)
+    surfaceElevated: Color(0xFFF2ECE3), // recessed fills / inset — separates from white
+    border:          Color(0x1A1B1714), // rgba(27,23,20,.10) — crisper card edges
+    borderStrong:    Color(0x2E1B1714), // rgba(27,23,20,.18)
     accent:          Color(0xFFE8112D), // ruby red
     accentDim:       Color(0xFFB50022),
     accentSoft:      Color(0x17E8112D), // rgba(232,17,45,.09)
     onAccent:        Color(0xFFFFFFFF),
     textPrimary:     Color(0xFF1B1714), // deep ink
-    textSecondary:   Color(0xFF615A52),
-    textMuted:       Color(0xFF9C9488),
-    textDim:         Color(0xFFB5ADA0),
+    textSecondary:   Color(0xFF5C554C), // a touch darker for body legibility
+    textMuted:       Color(0xFF8A8278), // darker than before — readable on linen
+    textDim:         Color(0xFFAEA597),
     positive:        Color(0xFF3F7E55),
     negative:        Color(0xFFE8112D),
     amber:           Color(0xFFD2912E),
@@ -163,6 +169,16 @@ class AppPalette extends ThemeExtension<AppPalette> {
 extension AppPaletteCtx on BuildContext {
   AppPalette get c => Theme.of(this).extension<AppPalette>()!;
   AppTextStyles get t => AppTextStyles._(c);
+}
+
+/// Section → palette colour. Single source of truth for the athletic / mind /
+/// body accent that was previously copy-pasted as a `switch` into ~8 screens.
+extension HabitSectionColor on HabitSection {
+  Color color(AppPalette c) => switch (this) {
+        HabitSection.athletic => c.athletic,
+        HabitSection.mind => c.mind,
+        HabitSection.body => c.body,
+      };
 }
 
 /// Base type tokens — font, size, weight, tracking. No colour.
@@ -263,6 +279,45 @@ class AppRadii {
 
 class AppSpace {
   static const screenH = 20.0;
+}
+
+/// Elevation tokens — one soft, warm-neutral shadow scale so every surface
+/// lifts consistently instead of each screen inventing its own (and the stray
+/// `Colors.black54` sheet shadows). Tuned for light mode; quietly subtle on dark.
+class AppShadows {
+  /// Resting card / tile.
+  static const List<BoxShadow> card = [
+    BoxShadow(
+      color: Color(0x0D000000), // black @ 5%
+      blurRadius: 9,
+      offset: Offset(0, 2),
+    ),
+  ];
+
+  /// A lifted / active surface (focused card, FAB, pressed-into-front).
+  static const List<BoxShadow> elevated = [
+    BoxShadow(
+      color: Color(0x14000000), // black @ 8%
+      blurRadius: 18,
+      spreadRadius: -2,
+      offset: Offset(0, 8),
+    ),
+    BoxShadow(
+      color: Color(0x0D000000),
+      blurRadius: 9,
+      offset: Offset(0, 2),
+    ),
+  ];
+
+  /// Bottom sheet / overlay rising above the scrim.
+  static const List<BoxShadow> sheet = [
+    BoxShadow(
+      color: Color(0x24000000), // black @ 14%
+      blurRadius: 30,
+      spreadRadius: -4,
+      offset: Offset(0, -6),
+    ),
+  ];
 }
 
 /// Theme factory.

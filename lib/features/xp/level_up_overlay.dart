@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import '../../core/dev/dev_mode.dart';
 import '../../core/theme/app_theme.dart';
 import '../../shared/services/supabase_service.dart';
 import '../auth/providers/auth_provider.dart';
@@ -12,9 +13,12 @@ import 'leveling_providers.dart';
 import 'prereq_providers.dart';
 import 'rank_tier.dart';
 
-/// Mounted near the app root. Watches level changes and pops a celebratory
-/// toast + radial particle burst. Also pushes a `notifications` row so the
-/// inbox keeps a record.
+/// Mounted near the app root. When the dual gate passes (XP threshold AND
+/// every milestone for the next transition), this widget *confirms* the
+/// level-up — persisting `users.confirmed_level` — then pops the celebratory
+/// burst, writes a `notifications` row, and pushes the milestone picker for
+/// the next chapter. Because confirmation recomputes `canLevelUpProvider`,
+/// banked XP spanning several levels chains one celebration at a time.
 class LevelUpOverlay extends ConsumerStatefulWidget {
   final Widget child;
   const LevelUpOverlay({super.key, required this.child});
@@ -24,28 +28,14 @@ class LevelUpOverlay extends ConsumerStatefulWidget {
 }
 
 class _LevelUpOverlayState extends ConsumerState<LevelUpOverlay> {
-  /// The highest level the user has been celebrated for during this session.
-  /// Initialized lazily on the first canLevelUp callback so a fresh user at
-  /// L1 doesn't immediately fire a "Level 1!" toast.
-  int? _lastSeenLevel;
   int? _showLevel;
   Timer? _dismiss;
+  bool _confirming = false;
 
   @override
   Widget build(BuildContext context) {
-    // Fires the overlay when both gates pass: the cumulative XP crosses the
-    // next-level threshold AND every pre-req for that level transition is
-    // marked met. Skipping past gates (cold start with everything already met)
-    // initializes _lastSeenLevel silently — no surprise toast on app open.
     ref.listen<AsyncValue<bool>>(canLevelUpProvider, (prev, next) {
-      final canLevelUp = next.valueOrNull ?? false;
-      if (!canLevelUp) return;
-      final currentLevel = ref.read(currentLevelProvider).level;
-      _lastSeenLevel ??= currentLevel;
-      if (currentLevel > _lastSeenLevel!) {
-        _fire(currentLevel);
-        _lastSeenLevel = currentLevel;
-      }
+      if (next.valueOrNull ?? false) _confirmPending();
     });
 
     return Stack(
@@ -59,6 +49,30 @@ class _LevelUpOverlayState extends ConsumerState<LevelUpOverlay> {
           ),
       ],
     );
+  }
+
+  /// Advances the confirmed level by exactly one and celebrates. Guarded so
+  /// overlapping provider refreshes can't double-award the same transition
+  /// (the DB write is additionally monotonic via [persistConfirmedLevel]).
+  Future<void> _confirmPending() async {
+    if (_confirming) return;
+    _confirming = true;
+    try {
+      final confirmed = await ref.read(confirmedLevelProvider.future);
+      final newLevel = confirmed + 1;
+      if (ref.read(devModeProvider)) {
+        ref.read(devConfirmedLevelProvider.notifier).state = newLevel;
+      } else {
+        final session = ref.read(sessionProvider);
+        if (session == null) return;
+        await persistConfirmedLevel(session.user.id, newLevel);
+      }
+      if (!mounted) return;
+      ref.invalidate(confirmedLevelProvider);
+      _fire(newLevel);
+    } finally {
+      _confirming = false;
+    }
   }
 
   void _fire(int level) {

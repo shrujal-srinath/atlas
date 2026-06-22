@@ -187,12 +187,7 @@ class _ReminderTile extends StatelessWidget {
 
   Color _sectionTint(BuildContext context, HabitSection? s) {
     final c = context.c;
-    return switch (s) {
-      HabitSection.athletic => c.athletic,
-      HabitSection.mind => c.mind,
-      HabitSection.body => c.body,
-      _ => c.accent,
-    };
+    return s?.color(c) ?? c.accent;
   }
 
   Color _tint(BuildContext context) {

@@ -85,7 +85,8 @@ class _IconBtn extends StatelessWidget {
         decoration: BoxDecoration(
           color: c.surface,
           borderRadius: BorderRadius.circular(AppRadii.chip),
-          border: Border.all(color: c.border),
+          border: Border.all(color: c.border, width: 0.5),
+          boxShadow: disabled ? null : AppShadows.card,
         ),
         child: Icon(icon, size: 18, color: disabled ? c.textDim : c.textSecondary),
       ),

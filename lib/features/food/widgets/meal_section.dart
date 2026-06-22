@@ -4,6 +4,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/models.dart';
 import '../domain/meal_entry.dart';
+import '../providers/food_providers.dart';
 import '../providers/health_score_providers.dart';
 import 'health_score_chip.dart';
 import 'quick_log_chips.dart';
@@ -17,6 +18,7 @@ class MealSection extends ConsumerWidget {
   final List<MealEntry> entries;
   final VoidCallback onAdd;
   final void Function(MealEntry) onDelete;
+  final void Function(MealEntry)? onEdit;
   final VoidCallback? onCopyMeal;
   final VoidCallback? onSaveAsMeal;
   final VoidCallback? onLoadSavedMeal;
@@ -28,6 +30,7 @@ class MealSection extends ConsumerWidget {
     required this.entries,
     required this.onAdd,
     required this.onDelete,
+    this.onEdit,
     this.onCopyMeal,
     this.onSaveAsMeal,
     this.onLoadSavedMeal,
@@ -38,135 +41,154 @@ class MealSection extends ConsumerWidget {
     final c = context.c;
     final score = ref.watch(mealHealthScoreProvider(slot));
     final tint = _tintFor(c, slot);
+    final target = ref.watch(mealTargetsProvider)[slot];
     final kcal = entries.fold<double>(0, (a, e) => a + e.totals.kcal);
+    final isEmpty = entries.isEmpty;
 
     return Container(
       decoration: BoxDecoration(
         color: c.surface,
         borderRadius: BorderRadius.circular(AppRadii.card),
-        border: Border.all(color: c.border),
+        border: Border.all(color: c.border, width: 0.5),
+        boxShadow: AppShadows.card,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Header
+          // ── Header: meal name · X of Y Cal · round + ──
           GestureDetector(
             onLongPress: entries.isNotEmpty ? onCopyMeal : null,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+              padding: const EdgeInsets.fromLTRB(14, 13, 12, 11),
               child: Row(
                 children: [
                   Container(
-                    width: 28, height: 28,
+                    width: 30, height: 30,
                     decoration: BoxDecoration(
                       color: tint.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(7),
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Icon(_iconFor(slot), size: 14, color: tint),
+                    child: Icon(_iconFor(slot), size: 15, color: tint),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 11),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Flexible(
+                          child: Text(
+                            slot.label,
+                            style: const TextStyle(
+                              fontFamily: 'Inter',
+                              fontSize: 15.5,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: -0.2,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        if (entries.isNotEmpty) ...[
+                          const SizedBox(width: 8),
+                          HealthScoreChip(score: score),
+                        ],
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   Text(
-                    slot.label.toUpperCase(),
-                    style: AppType.overline.copyWith(
-                      color: c.textSecondary,
-                      letterSpacing: 1.2,
-                    ),
+                    target != null
+                        ? '${kcal.round()} of $target Cal'
+                        : '${kcal.round()} Cal',
+                    style: AppType.numMd.copyWith(
+                        color: c.textMuted, fontSize: 12.5),
                   ),
-                  const SizedBox(width: 10),
-                  if (entries.isNotEmpty) HealthScoreChip(score: score),
-                  const Spacer(),
-                  if (entries.isNotEmpty) ...[
-                    GestureDetector(
-                      onTap: onCopyMeal,
-                      child: Icon(LucideIcons.copy, size: 13, color: c.textDim),
-                    ),
-                    const SizedBox(width: 12),
-                  ],
-                  Text('${kcal.round()}',
-                      style: AppType.numMd.copyWith(color: c.textPrimary)),
-                  const SizedBox(width: 2),
-                  Text('kcal',
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 10,
-                        fontWeight: FontWeight.w500,
-                        color: c.textMuted,
-                      )),
+                  const SizedBox(width: 8),
+                  _AddButton(tint: tint, onTap: onAdd),
                 ],
               ),
             ),
           ),
 
-          if (entries.isEmpty) ...[
-            // Empty state + quick-log chips beneath
+          if (isEmpty) ...[
+            // Friendly empty-state prompt card (tap to add)
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 0, 14, 4),
-              child: Text(
-                _emptyHintFor(slot),
-                style: AppType.meta.copyWith(color: c.textDim),
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+              child: Material(
+                color: c.surfaceElevated,
+                borderRadius: BorderRadius.circular(AppRadii.chip),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(AppRadii.chip),
+                  onTap: onAdd,
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 16),
+                    alignment: Alignment.center,
+                    child: Text(
+                      _emptyPromptFor(slot),
+                      textAlign: TextAlign.center,
+                      style: AppType.meta.copyWith(color: c.textMuted),
+                    ),
+                  ),
+                ),
               ),
             ),
             QuickLogChips(slot: slot, date: date),
+          ] else ...[
             Divider(height: 1, color: c.border),
-          ] else
-            Divider(height: 1, color: c.border),
-
-          // Entry rows
-          for (final e in entries) ...[
-            _EntryRow(entry: e, onDelete: () => onDelete(e)),
-            Divider(height: 1, color: c.border),
-          ],
-
-          // Add food + save/load
-          InkWell(
-            onTap: onAdd,
-            borderRadius: const BorderRadius.vertical(
-                bottom: Radius.circular(AppRadii.card)),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 13),
-              child: Row(
-                children: [
-                  Container(
-                    width: 22, height: 22,
-                    decoration: BoxDecoration(
-                      color: tint.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Icon(LucideIcons.plus, size: 13, color: tint),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Add food',
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: tint,
+            // Entry rows
+            for (final e in entries) ...[
+              _EntryRow(
+                entry: e,
+                onDelete: () => onDelete(e),
+                onTap: onEdit == null ? null : () => onEdit!(e),
+              ),
+              Divider(height: 1, color: c.border),
+            ],
+            // Footer: add more + save/load
+            InkWell(
+              onTap: onAdd,
+              borderRadius: const BorderRadius.vertical(
+                  bottom: Radius.circular(AppRadii.card)),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(14, 11, 14, 12),
+                child: Row(
+                  children: [
+                    Icon(LucideIcons.plus, size: 14, color: tint),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Add more',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: tint,
+                        ),
                       ),
                     ),
-                  ),
-                  if (onLoadSavedMeal != null)
-                    GestureDetector(
-                      onTap: onLoadSavedMeal,
-                      child: Padding(
-                        padding: const EdgeInsets.only(left: 8),
-                        child: Icon(LucideIcons.bookmark,
+                    if (onLoadSavedMeal != null)
+                      GestureDetector(
+                        onTap: onLoadSavedMeal,
+                        child: Padding(
+                          padding: const EdgeInsets.only(left: 8),
+                          child: Icon(LucideIcons.bookmark,
+                              size: 16, color: c.textMuted),
+                        ),
+                      ),
+                    if (onSaveAsMeal != null) ...[
+                      const SizedBox(width: 12),
+                      GestureDetector(
+                        onTap: onSaveAsMeal,
+                        child: Icon(LucideIcons.save,
                             size: 16, color: c.textMuted),
                       ),
-                    ),
-                  if (entries.isNotEmpty && onSaveAsMeal != null) ...[
-                    const SizedBox(width: 12),
-                    GestureDetector(
-                      onTap: onSaveAsMeal,
-                      child: Icon(LucideIcons.save,
-                          size: 16, color: c.textMuted),
-                    ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
-          ),
+          ],
         ],
       ),
     );
@@ -192,14 +214,38 @@ class MealSection extends ConsumerWidget {
         MealTimeSlot.dinner      => c.indigo,
       };
 
-  static String _emptyHintFor(MealTimeSlot s) => switch (s) {
-        MealTimeSlot.breakfast   => 'No breakfast logged · tap to add',
-        MealTimeSlot.preWorkout  => 'Pre-workout fuel — log to track',
-        MealTimeSlot.lunch       => 'Add your lunch to track macros',
-        MealTimeSlot.snack       => 'Log snacks to capture stray calories',
-        MealTimeSlot.postWorkout => 'Post-workout window — log recovery',
-        MealTimeSlot.dinner      => 'No dinner logged · tap to add',
+  static String _emptyPromptFor(MealTimeSlot s) => switch (s) {
+        MealTimeSlot.breakfast   => 'Start strong — log your breakfast 🍳',
+        MealTimeSlot.preWorkout  => 'Fuel up before training ⚡',
+        MealTimeSlot.lunch       => "Don't miss lunch — grab a tasty meal 🍱",
+        MealTimeSlot.snack       => 'Grab a snack to stay energized 🥜',
+        MealTimeSlot.postWorkout => 'Recover — log your post-workout meal 🥤',
+        MealTimeSlot.dinner      => 'Wind down with a balanced dinner 🌙',
       };
+}
+
+// ── Round add button (HealthifyMe-style) ────────────────────────────
+
+class _AddButton extends StatelessWidget {
+  final Color tint;
+  final VoidCallback onTap;
+  const _AddButton({required this.tint, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: tint.withValues(alpha: 0.14),
+      shape: const CircleBorder(),
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(7),
+          child: Icon(LucideIcons.plus, size: 17, color: tint),
+        ),
+      ),
+    );
+  }
 }
 
 // ── Entry row ───────────────────────────────────────────────────────
@@ -207,7 +253,8 @@ class MealSection extends ConsumerWidget {
 class _EntryRow extends StatelessWidget {
   final MealEntry entry;
   final VoidCallback onDelete;
-  const _EntryRow({required this.entry, required this.onDelete});
+  final VoidCallback? onTap;
+  const _EntryRow({required this.entry, required this.onDelete, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -225,7 +272,9 @@ class _EntryRow extends StatelessWidget {
         child: Icon(LucideIcons.trash2, color: c.negative, size: 18),
       ),
       onDismissed: (_) => onDelete(),
-      child: Padding(
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
@@ -234,11 +283,21 @@ class _EntryRow extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    entry.name,
-                    style: t.bodyStrong,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          entry.name,
+                          style: t.bodyStrong,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (entry.loggedVia == 'habit') ...[
+                        const SizedBox(width: 7),
+                        const _TaskBadge(),
+                      ],
+                    ],
                   ),
                   const SizedBox(height: 3),
                   Text(
@@ -276,6 +335,7 @@ class _EntryRow extends StatelessWidget {
             ),
           ],
         ),
+        ),
       ),
     );
   }
@@ -283,6 +343,39 @@ class _EntryRow extends StatelessWidget {
   String _fmtQty(double q) {
     if (q == q.roundToDouble()) return q.toStringAsFixed(0);
     return q.toStringAsFixed(1);
+  }
+}
+
+/// Tiny marker on diary rows that were auto-logged by completing a task.
+class _TaskBadge extends StatelessWidget {
+  const _TaskBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: c.accent.withValues(alpha: 0.11),
+        borderRadius: BorderRadius.circular(AppRadii.pill),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(LucideIcons.listChecks, size: 10, color: c.accent),
+          const SizedBox(width: 3),
+          Text(
+            'Task',
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              color: c.accent,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -297,7 +390,7 @@ class _MacroChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
+        color: color.withValues(alpha: 0.11),
         borderRadius: BorderRadius.circular(AppRadii.pill),
       ),
       child: Text(
@@ -305,8 +398,8 @@ class _MacroChip extends StatelessWidget {
         style: TextStyle(
           fontFamily: 'SpaceGrotesk',
           fontSize: 9,
-          fontWeight: FontWeight.w600,
-          color: color.withValues(alpha: 0.85),
+          fontWeight: FontWeight.w700,
+          color: color,
         ),
       ),
     );

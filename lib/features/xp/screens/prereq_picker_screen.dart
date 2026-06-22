@@ -9,13 +9,16 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:uuid/uuid.dart';
 import '../../../core/dev/dev_mode.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/atlas_controls.dart';
+import '../../../core/theme/app_icons.dart';
 import '../../../shared/models/models.dart';
+import '../../../shared/widgets/atlas_back_button.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../habits/providers/habit_provider.dart';
 import '../models/level_prereq.dart';
@@ -38,10 +41,7 @@ class PrereqPickerScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: c.background,
       appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(LucideIcons.chevronLeft),
-          onPressed: () => context.pop(),
-        ),
+        leading: const AtlasBackButton(fallback: '/stats/progression'),
         title: Text('Set milestones', style: t.h2),
         centerTitle: true,
       ),
@@ -144,8 +144,8 @@ class PrereqPickerScreen extends ConsumerWidget {
           _SuggestionKind.streak100 => 100,
           _ => 21,
         };
-        final h = await _pickHabit(context, habits,
-            title: 'Pick a habit to streak ($days days)');
+        final h = await showHabitPickerSheet(context, habits,
+            title: 'Pick a task to streak ($days days)');
         if (h == null) return;
         built = _make(PrereqKind.streakDays, {
           'habitId': h.id,
@@ -189,7 +189,11 @@ class PrereqPickerScreen extends ConsumerWidget {
       userId: 'pending',
       level: level,
       kind: kind,
-      config: config,
+      // Stamp the start so any timeframe window has a clock to count from.
+      config: {
+        ...config,
+        'startedAt': DateTime.now().toUtc().toIso8601String(),
+      },
     );
   }
 
@@ -218,55 +222,6 @@ class PrereqPickerScreen extends ConsumerWidget {
     }
     await ref.read(levelPrereqRepoProvider).delete(p.id);
     ref.invalidate(userPrereqsProvider);
-  }
-
-  Future<Habit?> _pickHabit(BuildContext context, List<Habit> habits,
-      {required String title}) {
-    return showModalBottomSheet<Habit>(
-      context: context,
-      backgroundColor: context.c.background,
-      isScrollControlled: true,
-      builder: (ctx) {
-        final c = ctx.c;
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: ctx.t.h2),
-                const SizedBox(height: 12),
-                if (habits.isEmpty)
-                  Text('No habits yet — create one first.',
-                      style: AppType.meta.copyWith(color: c.textMuted))
-                else
-                  ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxHeight: MediaQuery.of(ctx).size.height * 0.5,
-                    ),
-                    child: ListView.separated(
-                      shrinkWrap: true,
-                      itemCount: habits.length,
-                      separatorBuilder: (_, _) => Divider(
-                          height: 1, thickness: 0.5, color: c.border),
-                      itemBuilder: (_, i) {
-                        final h = habits[i];
-                        return ListTile(
-                          title: Text(h.name, style: ctx.t.bodyStrong),
-                          subtitle: Text(_sectionLabel(h.section),
-                              style: AppType.meta.copyWith(color: c.textMuted)),
-                          onTap: () => Navigator.of(ctx).pop(h),
-                        );
-                      },
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
   }
 
   void _openCustomSheet(
@@ -640,25 +595,12 @@ class _AddCustomButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = context.c;
-    return OutlinedButton.icon(
+    return AtlasButton(
+      label: 'Custom milestone',
+      icon: LucideIcons.plus,
+      variant: AtlasButtonVariant.tonal,
+      height: 46,
       onPressed: onTap,
-      icon: Icon(LucideIcons.plus, size: 14, color: c.accent),
-      label: Text(
-        'Custom milestone',
-        style: TextStyle(
-          fontFamily: 'Inter',
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-          color: c.accent,
-        ),
-      ),
-      style: OutlinedButton.styleFrom(
-        side: BorderSide(color: c.border, width: 0.5),
-        minimumSize: const Size.fromHeight(44),
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadii.card)),
-      ),
     );
   }
 }
@@ -685,7 +627,7 @@ class _BottomBar extends StatelessWidget {
           children: [
             Expanded(
               child: TextButton(
-                onPressed: () => context.pop(),
+                onPressed: () => popOrGo(context, '/stats/progression'),
                 child: Text(
                   'Skip',
                   style: TextStyle(
@@ -699,7 +641,7 @@ class _BottomBar extends StatelessWidget {
             Expanded(
               flex: 2,
               child: FilledButton(
-                onPressed: () => context.pop(),
+                onPressed: () => popOrGo(context, '/stats/progression'),
                 style: FilledButton.styleFrom(
                   minimumSize: const Size.fromHeight(46),
                 ),
@@ -717,6 +659,123 @@ class _BottomBar extends StatelessWidget {
   }
 }
 
+// ── Themed task picker ───────────────────────────────────────────
+//
+// Reusable bottom sheet that lists the user's tasks (habits) so a milestone
+// can be linked to a real one. Replaces the bare dropdown that showed the
+// literal word "Habit".
+
+Future<Habit?> showHabitPickerSheet(
+  BuildContext context,
+  List<Habit> habits, {
+  required String title,
+}) {
+  return showModalBottomSheet<Habit>(
+    context: context,
+    backgroundColor: Colors.transparent,
+    isScrollControlled: true,
+    builder: (ctx) {
+      final c = ctx.c;
+      return Container(
+        decoration: BoxDecoration(
+          color: c.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          border: Border(top: BorderSide(color: c.border)),
+        ),
+        padding: EdgeInsets.fromLTRB(
+          AppSpace.screenH,
+          14,
+          AppSpace.screenH,
+          MediaQuery.of(ctx).viewPadding.bottom + 16,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: c.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(title, style: ctx.t.h2),
+            const SizedBox(height: 12),
+            if (habits.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 18),
+                child: Text('No tasks yet — create one first.',
+                    style: AppType.meta.copyWith(color: c.textMuted)),
+              )
+            else
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: habits.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 8),
+                  itemBuilder: (_, i) {
+                    final h = habits[i];
+                    final color = h.section.color(c);
+                    return Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(AppRadii.chip),
+                        onTap: () {
+                          HapticFeedback.selectionClick();
+                          Navigator.of(ctx).pop(h);
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: c.surfaceElevated,
+                            borderRadius: BorderRadius.circular(AppRadii.chip),
+                            border: Border.all(color: c.border, width: 0.5),
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 30,
+                                height: 30,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: color.withValues(alpha: 0.13),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Icon(habitIcon(h.icon),
+                                    size: 15, color: color),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(h.name, style: ctx.t.bodyStrong),
+                                    Text(_sectionLabel(h.section),
+                                        style: AppType.meta
+                                            .copyWith(color: c.textMuted)),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
 // ── Custom prereq sheet ──────────────────────────────────────────
 
 class _CustomPrereqSheet extends StatefulWidget {
@@ -731,136 +790,189 @@ class _CustomPrereqSheet extends StatefulWidget {
 class _CustomPrereqSheetState extends State<_CustomPrereqSheet> {
   PrereqKind _kind = PrereqKind.habitCompletions;
   Habit? _habit;
-  final _countCtl = TextEditingController(text: '7');
-  final _thresholdCtl = TextEditingController(text: '90');
+  int _count = 7;
+  int _threshold = 90; // score % or nutrition %
+  int? _windowDays; // null = no timeframe
 
-  @override
-  void dispose() {
-    _countCtl.dispose();
-    _thresholdCtl.dispose();
-    super.dispose();
+  bool get _needsHabit =>
+      _kind == PrereqKind.habitCompletions || _kind == PrereqKind.streakDays;
+  bool get _hasThreshold =>
+      _kind == PrereqKind.perfectDays || _kind == PrereqKind.nutritionDays;
+
+  String get _countLabel => switch (_kind) {
+        PrereqKind.habitCompletions => 'Repetitions',
+        PrereqKind.streakDays => 'Streak length (days)',
+        PrereqKind.perfectDays => 'Number of days',
+        PrereqKind.nutritionDays => 'Number of days',
+      };
+
+  void _onKindChanged(PrereqKind k) {
+    setState(() {
+      _kind = k;
+      if (k == PrereqKind.streakDays && _count < 7) _count = 21;
+      _threshold = k == PrereqKind.nutritionDays ? 80 : 90;
+    });
+  }
+
+  Future<void> _pickHabit() async {
+    final h = await showHabitPickerSheet(context, widget.habits,
+        title: 'Link a task');
+    if (h != null) setState(() => _habit = h);
   }
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final needsHabit = _kind == PrereqKind.habitCompletions ||
-        _kind == PrereqKind.streakDays;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-        20, 18, 20, 18 + MediaQuery.of(context).viewInsets.bottom,
+    return Container(
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        border: Border(top: BorderSide(color: c.border)),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Custom milestone', style: context.t.h2),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<PrereqKind>(
-            initialValue: _kind,
-            decoration: const InputDecoration(labelText: 'Kind'),
-            items: const [
-              DropdownMenuItem(
-                  value: PrereqKind.habitCompletions,
-                  child: Text('Habit completions')),
-              DropdownMenuItem(
-                  value: PrereqKind.streakDays, child: Text('Streak days')),
-              DropdownMenuItem(
-                  value: PrereqKind.perfectDays, child: Text('Perfect days')),
-              DropdownMenuItem(
-                  value: PrereqKind.nutritionDays,
-                  child: Text('Nutrition days')),
+      padding: EdgeInsets.fromLTRB(
+        AppSpace.screenH,
+        14,
+        AppSpace.screenH,
+        MediaQuery.of(context).viewPadding.bottom + 16,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: c.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text('Custom milestone', style: context.t.h2),
+            const SizedBox(height: 18),
+
+            _FieldLabel('TYPE'),
+            const SizedBox(height: 8),
+            _KindChips(selected: _kind, onChanged: _onKindChanged),
+            const SizedBox(height: 18),
+
+            if (_needsHabit) ...[
+              _FieldLabel('TASK'),
+              const SizedBox(height: 8),
+              _PickerTile(
+                icon: _habit == null
+                    ? LucideIcons.listPlus
+                    : habitIcon(_habit!.icon),
+                color: _habit == null
+                    ? c.textMuted
+                    : _habit!.section.color(c),
+                label: _habit?.name ?? 'Choose a task',
+                muted: _habit == null,
+                onTap: _pickHabit,
+              ),
+              const SizedBox(height: 18),
             ],
-            onChanged: (k) => setState(() => _kind = k ?? _kind),
-          ),
-          const SizedBox(height: 10),
-          if (needsHabit) ...[
-            DropdownButtonFormField<Habit>(
-              initialValue: _habit,
-              decoration: const InputDecoration(labelText: 'Habit'),
-              items: [
-                for (final h in widget.habits)
-                  DropdownMenuItem(value: h, child: Text(h.name)),
+
+            _FieldLabel(_countLabel.toUpperCase()),
+            const SizedBox(height: 8),
+            _Stepper(
+              value: _count,
+              min: 1,
+              max: 365,
+              step: _kind == PrereqKind.habitCompletions ? 1 : 1,
+              onChanged: (v) => setState(() => _count = v),
+            ),
+
+            if (_hasThreshold) ...[
+              const SizedBox(height: 18),
+              _FieldLabel(_kind == PrereqKind.perfectDays
+                  ? 'MIN SCORE (%)'
+                  : 'MIN NUTRITION (%)'),
+              const SizedBox(height: 8),
+              _Stepper(
+                value: _threshold,
+                min: 50,
+                max: 100,
+                step: 5,
+                onChanged: (v) => setState(() => _threshold = v),
+              ),
+            ],
+
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                _FieldLabel('TIMEFRAME'),
+                const SizedBox(width: 8),
+                Text('optional',
+                    style: AppType.meta.copyWith(color: c.textDim)),
               ],
-              onChanged: (h) => setState(() => _habit = h),
             ),
-            const SizedBox(height: 10),
-          ],
-          TextField(
-            controller: _countCtl,
-            keyboardType: TextInputType.number,
-            decoration: InputDecoration(
-              labelText: _kind == PrereqKind.streakDays ? 'Days' : 'Count',
+            const SizedBox(height: 8),
+            _TimeframeChips(
+              selected: _windowDays,
+              onChanged: (v) => setState(() => _windowDays = v),
             ),
-          ),
-          if (_kind == PrereqKind.perfectDays ||
-              _kind == PrereqKind.nutritionDays) ...[
-            const SizedBox(height: 10),
-            TextField(
-              controller: _thresholdCtl,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: _kind == PrereqKind.perfectDays
-                    ? 'Min score (0-100)'
-                    : 'Min nutrition % (0-100)',
-              ),
+            const SizedBox(height: 6),
+            Text(
+              _windowDays == null
+                  ? 'No deadline — finish it whenever.'
+                  : 'You’ll have $_windowDays days to finish this once set.',
+              style: AppType.meta.copyWith(color: c.textMuted),
             ),
-          ],
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: TextButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: Text('Cancel',
-                      style: TextStyle(color: c.textMuted)),
+
+            const SizedBox(height: 22),
+            Row(
+              children: [
+                Expanded(
+                  child: AtlasButton(
+                    label: 'Cancel',
+                    variant: AtlasButtonVariant.secondary,
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
                 ),
-              ),
-              Expanded(
-                flex: 2,
-                child: FilledButton(
-                  onPressed: _save,
-                  child: const Text('Save'),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: AtlasButton(
+                    label: 'Save milestone',
+                    onPressed: _save,
+                  ),
                 ),
-              ),
-            ],
-          ),
-        ],
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
 
   void _save() {
-    final raw = int.tryParse(_countCtl.text.trim()) ?? 0;
-    if (raw <= 0) {
+    if (_needsHabit && _habit == null) {
+      HapticFeedback.heavyImpact();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a target count > 0')),
+        const SnackBar(content: Text('Pick a task to link this milestone to.')),
       );
       return;
     }
-    if ((_kind == PrereqKind.habitCompletions ||
-            _kind == PrereqKind.streakDays) &&
-        _habit == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pick a habit')),
-      );
-      return;
-    }
-    final cfg = <String, dynamic>{};
+    final cfg = <String, dynamic>{
+      'startedAt': DateTime.now().toUtc().toIso8601String(),
+      if (_windowDays != null) 'windowDays': _windowDays,
+    };
     switch (_kind) {
       case PrereqKind.habitCompletions:
-        cfg.addAll({'habitId': _habit!.id, 'targetCount': raw});
+        cfg.addAll({'habitId': _habit!.id, 'targetCount': _count});
         break;
       case PrereqKind.streakDays:
-        cfg.addAll({'habitId': _habit!.id, 'targetDays': raw});
+        cfg.addAll({'habitId': _habit!.id, 'targetDays': _count});
         break;
       case PrereqKind.perfectDays:
-        final th = int.tryParse(_thresholdCtl.text.trim()) ?? 90;
-        cfg.addAll({'targetCount': raw, 'scoreThreshold': th});
+        cfg.addAll({'targetCount': _count, 'scoreThreshold': _threshold});
         break;
       case PrereqKind.nutritionDays:
-        final th = (int.tryParse(_thresholdCtl.text.trim()) ?? 80) / 100.0;
-        cfg.addAll({'targetCount': raw, 'ratioThreshold': th});
+        cfg.addAll({'targetCount': _count, 'ratioThreshold': _threshold / 100.0});
         break;
     }
     final p = LevelPrereq(
@@ -871,6 +983,260 @@ class _CustomPrereqSheetState extends State<_CustomPrereqSheet> {
       config: cfg,
     );
     widget.onSave(p);
+  }
+}
+
+// ── Custom-sheet building blocks ─────────────────────────────────
+
+class _FieldLabel extends StatelessWidget {
+  final String text;
+  const _FieldLabel(this.text);
+  @override
+  Widget build(BuildContext context) => Text(
+        text,
+        style: AppType.overline
+            .copyWith(color: context.c.textMuted, letterSpacing: 1.2),
+      );
+}
+
+({String label, IconData icon}) _kindChip(PrereqKind k) => switch (k) {
+      PrereqKind.habitCompletions =>
+        (label: 'Task reps', icon: LucideIcons.checkSquare),
+      PrereqKind.streakDays => (label: 'Streak', icon: LucideIcons.flame),
+      PrereqKind.perfectDays =>
+        (label: 'Perfect days', icon: LucideIcons.target),
+      PrereqKind.nutritionDays =>
+        (label: 'Nutrition', icon: LucideIcons.utensils),
+    };
+
+class _KindChips extends StatelessWidget {
+  final PrereqKind selected;
+  final ValueChanged<PrereqKind> onChanged;
+  const _KindChips({required this.selected, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final k in PrereqKind.values)
+          GestureDetector(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              onChanged(k);
+            },
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+              decoration: BoxDecoration(
+                color: selected == k ? c.accentSoft : c.surfaceElevated,
+                borderRadius: BorderRadius.circular(AppRadii.pill),
+                border: Border.all(
+                  color: selected == k ? c.accent : c.border,
+                  width: selected == k ? 1 : 0.5,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(_kindChip(k).icon,
+                      size: 13,
+                      color: selected == k ? c.accent : c.textMuted),
+                  const SizedBox(width: 6),
+                  Text(
+                    _kindChip(k).label,
+                    style: AppType.label.copyWith(
+                      color: selected == k ? c.accent : c.textSecondary,
+                      fontWeight:
+                          selected == k ? FontWeight.w700 : FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _PickerTile extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String label;
+  final bool muted;
+  final VoidCallback onTap;
+  const _PickerTile({
+    required this.icon,
+    required this.color,
+    required this.label,
+    required this.muted,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.chip),
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTap();
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 13),
+          decoration: BoxDecoration(
+            color: c.surfaceElevated,
+            borderRadius: BorderRadius.circular(AppRadii.chip),
+            border: Border.all(color: c.border, width: 0.5),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.13),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, size: 15, color: color),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  label,
+                  style: context.t.bodyStrong.copyWith(
+                    color: muted ? c.textMuted : c.textPrimary,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Icon(LucideIcons.chevronRight, size: 18, color: c.textMuted),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Stepper extends StatelessWidget {
+  final int value;
+  final int min;
+  final int max;
+  final int step;
+  final ValueChanged<int> onChanged;
+  const _Stepper({
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.step,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    Widget btn(IconData icon, VoidCallback? onTap) => Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: onTap == null
+                ? null
+                : () {
+                    HapticFeedback.selectionClick();
+                    onTap();
+                  },
+            child: Container(
+              width: 44,
+              height: 44,
+              alignment: Alignment.center,
+              child: Icon(icon,
+                  size: 20,
+                  color: onTap == null ? c.textDim : c.textPrimary),
+            ),
+          ),
+        );
+    return Container(
+      decoration: BoxDecoration(
+        color: c.surfaceElevated,
+        borderRadius: BorderRadius.circular(AppRadii.chip),
+        border: Border.all(color: c.border, width: 0.5),
+      ),
+      child: Row(
+        children: [
+          btn(LucideIcons.minus,
+              value > min ? () => onChanged((value - step).clamp(min, max)) : null),
+          Expanded(
+            child: Text(
+              '$value',
+              textAlign: TextAlign.center,
+              style: AppType.numMd.copyWith(color: c.textPrimary, fontSize: 20),
+            ),
+          ),
+          btn(LucideIcons.plus,
+              value < max ? () => onChanged((value + step).clamp(min, max)) : null),
+        ],
+      ),
+    );
+  }
+}
+
+class _TimeframeChips extends StatelessWidget {
+  final int? selected;
+  final ValueChanged<int?> onChanged;
+  const _TimeframeChips({required this.selected, required this.onChanged});
+
+  static const _options = <({String label, int? days})>[
+    (label: 'No deadline', days: null),
+    (label: '21 days', days: 21),
+    (label: '30 days', days: 30),
+    (label: '60 days', days: 60),
+    (label: '90 days', days: 90),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final o in _options)
+          GestureDetector(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              onChanged(o.days);
+            },
+            child: Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+              decoration: BoxDecoration(
+                color: selected == o.days ? c.accentSoft : c.surfaceElevated,
+                borderRadius: BorderRadius.circular(AppRadii.pill),
+                border: Border.all(
+                  color: selected == o.days ? c.accent : c.border,
+                  width: selected == o.days ? 1 : 0.5,
+                ),
+              ),
+              child: Text(
+                o.label,
+                style: AppType.label.copyWith(
+                  color: selected == o.days ? c.accent : c.textSecondary,
+                  fontWeight:
+                      selected == o.days ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
   }
 }
 

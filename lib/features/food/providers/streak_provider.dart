@@ -53,3 +53,22 @@ DayLogState _classify(double kcal, double target, bool hasEntries) {
   if (r >= 0.80 && r <= 1.15) return DayLogState.hit;
   return DayLogState.partial;
 }
+
+/// Total kcal consumed for each day of [month] (keyed by day-of-month 1..31),
+/// for the Fueling Calendar heatmap. Days with no log are simply absent from
+/// the map. Keyed by a normalised first-of-month so the family caches per
+/// month. Re-watches [diaryDateProvider] so it refreshes after today's logs.
+final monthCaloriesProvider =
+    FutureProvider.autoDispose.family<Map<int, double>, DateTime>(
+        (ref, month) async {
+  final repo = ref.watch(foodRepositoryProvider);
+  ref.watch(diaryDateProvider);
+  final first = DateTime(month.year, month.month, 1);
+  final last = DateTime(month.year, month.month + 1, 0);
+  final bucketed = await repo.entriesForRange(first, last);
+  final out = <int, double>{};
+  bucketed.forEach((d, entries) {
+    out[d.day] = entries.fold<double>(0, (a, e) => a + e.totals.kcal);
+  });
+  return out;
+});

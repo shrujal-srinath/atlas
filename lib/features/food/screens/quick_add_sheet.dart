@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'; // HapticFeedback
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/app_snackbar.dart';
 import '../../../shared/models/models.dart';
 import '../domain/meal_entry.dart';
 import '../providers/food_providers.dart';
@@ -171,9 +172,7 @@ class _QuickAddSheetState extends ConsumerState<QuickAddSheet> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed: $e')),
-      );
+      showErrorSnack(context, e);
     }
   }
 }

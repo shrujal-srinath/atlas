@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_theme.dart';
-import '../providers/food_providers.dart';
 import '../providers/streak_provider.dart';
+import 'fuel_calendar_sheet.dart';
 
-/// 7-dot horizontal strip of last week's logging adherence.
-/// Filled (accent) = hit ≥80% of target & logged ≥1 entry.
-/// Today's dot has a 1px accent ring.
-/// Tap a dot → jump the diary to that date.
+/// Tappable fueling summary: a 7-day adherence preview that opens the full
+/// month [FuelCalendarSheet] on tap. Filled (accent) dot = hit ≥80% of target.
 class StreakStrip extends ConsumerWidget {
   const StreakStrip({super.key});
 
@@ -17,44 +17,67 @@ class StreakStrip extends ConsumerWidget {
     final c = context.c;
     final async = ref.watch(streakProvider);
 
-    return async.when(
-      data: (days) {
-        final hits = days.where((d) => d.state == DayLogState.hit).length;
-        return Row(
-          children: [
-            Text('STREAK',
-                style: AppType.overline.copyWith(color: c.textMuted, letterSpacing: 1.2)),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.start,
+    return Material(
+      color: c.surface,
+      borderRadius: BorderRadius.circular(AppRadii.card),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        onTap: () {
+          HapticFeedback.selectionClick();
+          showFuelCalendar(context);
+        },
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(12, 9, 10, 9),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadii.card),
+            border: Border.all(color: c.border, width: 0.5),
+            boxShadow: AppShadows.card,
+          ),
+          child: async.when(
+            data: (days) {
+              final hits = days.where((d) => d.state == DayLogState.hit).length;
+              return Row(
                 children: [
-                  for (final d in days) ...[
-                    _Dot(
-                      day: d,
-                      onTap: () =>
-                          ref.read(diaryDateProvider.notifier).state = d.date,
+                  Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: c.accentSoft,
+                      borderRadius: BorderRadius.circular(8),
                     ),
+                    child: Icon(LucideIcons.calendarRange,
+                        size: 15, color: c.accent),
+                  ),
+                  const SizedBox(width: 10),
+                  Text('FUELING',
+                      style: AppType.overline
+                          .copyWith(color: c.textMuted, letterSpacing: 1.2)),
+                  const SizedBox(width: 12),
+                  for (final d in days) ...[
+                    _Dot(day: d),
                     const SizedBox(width: 6),
                   ],
+                  const Spacer(),
+                  Text('$hits/7',
+                      style:
+                          AppType.numMd.copyWith(color: c.textPrimary, fontSize: 13)),
+                  const SizedBox(width: 4),
+                  Icon(LucideIcons.chevronRight, size: 16, color: c.textMuted),
                 ],
-              ),
-            ),
-            Text('$hits / 7',
-                style: AppType.numMd.copyWith(color: c.textPrimary, fontSize: 13)),
-          ],
-        );
-      },
-      loading: () => const SizedBox(height: 14),
-      error: (_, _) => const SizedBox.shrink(),
+              );
+            },
+            loading: () => const SizedBox(height: 28),
+            error: (_, _) => const SizedBox(height: 28),
+          ),
+        ),
+      ),
     );
   }
 }
 
 class _Dot extends StatelessWidget {
   final DayLog day;
-  final VoidCallback onTap;
-  const _Dot({required this.day, required this.onTap});
+  const _Dot({required this.day});
 
   @override
   Widget build(BuildContext context) {
@@ -80,31 +103,28 @@ class _Dot extends StatelessWidget {
     return Tooltip(
       message: '${DateFormat('EEE MMM d').format(day.date)} · '
           '${day.kcal.round()} kcal',
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: onTap,
-        child: Container(
-          width: 14,
-          height: 14,
-          decoration: BoxDecoration(
-            color: fill,
-            shape: BoxShape.circle,
-            border: Border.all(color: stroke, width: 1),
-          ),
-          child: day.isToday
-              ? Center(
-                  child: Container(
-                    width: 4, height: 4,
-                    decoration: BoxDecoration(
-                      color: day.state == DayLogState.empty
-                          ? c.accent
-                          : c.background,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                )
-              : null,
+      child: Container(
+        width: 13,
+        height: 13,
+        decoration: BoxDecoration(
+          color: fill,
+          shape: BoxShape.circle,
+          border: Border.all(color: stroke, width: 1),
         ),
+        child: day.isToday
+            ? Center(
+                child: Container(
+                  width: 4,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: day.state == DayLogState.empty
+                        ? c.accent
+                        : c.background,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              )
+            : null,
       ),
     );
   }

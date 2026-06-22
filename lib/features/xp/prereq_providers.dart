@@ -69,25 +69,39 @@ final prereqProgressProvider =
   final defs = await ref.watch(userPrereqsProvider(level).future);
   if (defs.isEmpty) return const [];
 
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+
   final results = <PrereqProgress>[];
   for (final d in defs) {
     final current = await _progressFor(ref, d);
+    final isMet = d.target > 0 && current >= d.target;
+    int? daysLeft;
+    final dl = d.deadline;
+    if (dl != null) {
+      final diff = dl.difference(today).inDays;
+      daysLeft = diff < 0 ? 0 : diff;
+    }
     results.add(PrereqProgress(
       def: d,
       currentProgress: current,
       target: d.target,
-      isMet: d.target > 0 && current >= d.target,
+      isMet: isMet,
+      daysLeft: daysLeft,
     ));
   }
   return results;
 });
 
-/// True iff the user has both the XP and all pre-reqs to advance to L+1.
-/// If no pre-reqs are defined, only the XP gate applies.
+/// True iff the user has both the XP and all pre-reqs to advance from the
+/// *confirmed* level to the next one. If no pre-reqs are defined, only the
+/// XP gate applies. When this flips true the level-up overlay confirms the
+/// transition (persisting `users.confirmed_level`), which recomputes this
+/// provider — banked XP spanning several levels chains naturally.
 final canLevelUpProvider = FutureProvider<bool>((ref) async {
-  final cur = ref.watch(currentLevelProvider);
-  final xp = ref.watch(cumulativeLevelXpProvider).valueOrNull ?? 0;
-  final nextLevel = cur.level + 1;
+  final confirmed = await ref.watch(confirmedLevelProvider.future);
+  final xp = await ref.watch(cumulativeLevelXpProvider.future);
+  final nextLevel = confirmed + 1;
   if (xp < xpForLevel(nextLevel)) return false;
 
   final progress = await ref.watch(prereqProgressProvider(nextLevel).future);
@@ -99,27 +113,33 @@ final canLevelUpProvider = FutureProvider<bool>((ref) async {
 // ────────────────────────────────────────────────────────────────────
 
 Future<int> _progressFor(Ref ref, LevelPrereq def) async {
+  // When a timeframe is set, only count activity on/after the start day.
+  final since = def.hasWindow ? _dateKey(def.startedAt!) : null;
   switch (def.kind) {
     case PrereqKind.habitCompletions:
-      return _habitCompletionCount(ref, def.habitId);
+      return _habitCompletionCount(ref, def.habitId, since);
     case PrereqKind.streakDays:
+      // A streak is inherently "current run"; the timeframe is a deadline only.
       return _currentStreakFor(ref, def.habitId);
     case PrereqKind.perfectDays:
-      return _perfectDaysCount(ref, def.scoreThreshold);
+      return _perfectDaysCount(ref, def.scoreThreshold, since);
     case PrereqKind.nutritionDays:
-      return _nutritionDaysCount(ref, def.ratioThreshold);
+      return _nutritionDaysCount(ref, def.ratioThreshold, since);
   }
 }
 
-Future<int> _habitCompletionCount(Ref ref, String? habitId) async {
+String _dateKey(DateTime d) =>
+    '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+Future<int> _habitCompletionCount(Ref ref, String? habitId, String? since) async {
   if (habitId == null) return 0;
   if (ref.read(devModeProvider)) {
     final today = DateTime.now();
     int count = 0;
     for (int i = _kPrereqScanDays; i >= 0; i--) {
       final d = today.subtract(Duration(days: i));
-      final key =
-          '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+      final key = _dateKey(d);
+      if (since != null && key.compareTo(since) < 0) continue;
       final logs =
           await ref.read(habitLogsForDateProvider(key).future);
       if (logs.any((l) => l.habitId == habitId && l.completed)) count++;
@@ -129,12 +149,14 @@ Future<int> _habitCompletionCount(Ref ref, String? habitId) async {
   final session = ref.read(sessionProvider);
   if (session == null) return 0;
   try {
-    final rows = await SupabaseService.client
+    var q = SupabaseService.client
         .from('habit_logs')
         .select('id')
         .eq('user_id', session.user.id)
         .eq('habit_id', habitId)
         .eq('completed', true);
+    if (since != null) q = q.gte('date', since);
+    final rows = await q;
     return (rows as List).length;
   } catch (_) {
     return 0;
@@ -164,38 +186,74 @@ Future<int> _currentStreakFor(Ref ref, String? habitId) async {
   return streak;
 }
 
-Future<int> _perfectDaysCount(Ref ref, int scoreThreshold) async {
+Future<int> _perfectDaysCount(Ref ref, int scoreThreshold, String? since) async {
   final today = DateTime.now();
-  int count = 0;
-  for (int i = _kPrereqScanDays; i >= 0; i--) {
-    final d = today.subtract(Duration(days: i));
-    final s = await ref.read(homeScoreProvider(d).future);
-    if (s.score >= scoreThreshold) count++;
+  // Dev mode: no snapshot table — recompute from mock scores.
+  if (ref.read(devModeProvider)) {
+    int count = 0;
+    for (int i = _kPrereqScanDays; i >= 0; i--) {
+      final d = today.subtract(Duration(days: i));
+      if (since != null && _dateKey(d).compareTo(since) < 0) continue;
+      final s = await ref.read(homeScoreProvider(d).future);
+      if (s.score >= scoreThreshold) count++;
+    }
+    return count;
   }
+  // Real mode: past days come from the snapshot ledger; today is live.
+  final session = ref.read(sessionProvider);
+  if (session == null) return 0;
+  int count = 0;
+  try {
+    var q = SupabaseService.client
+        .from('daily_score_snapshots')
+        .select('id')
+        .eq('user_id', session.user.id)
+        .lt('date', _todayKey())
+        .gte('score', scoreThreshold);
+    if (since != null) q = q.gte('date', since);
+    count = (await q as List).length;
+  } catch (_) {}
+  try {
+    final t = await ref.read(homeScoreProvider(_todayDate()).future);
+    if (t.score >= scoreThreshold) count++;
+  } catch (_) {}
   return count;
 }
 
-Future<int> _nutritionDaysCount(Ref ref, double ratioThreshold) async {
-  // For dev mode and current day, derive live from food + targets.
-  // For real mode + past days we'd ideally read from
-  // `daily_score_snapshots.nutrition_ratio` — wired below as a fallback.
+DateTime _todayDate() {
+  final n = DateTime.now();
+  return DateTime(n.year, n.month, n.day);
+}
+
+String _todayKey() {
+  final d = _todayDate();
+  return '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+}
+
+Future<int> _nutritionDaysCount(
+    Ref ref, double ratioThreshold, String? since) async {
+  // Past days come from the `nutrition_ratio` cached on each snapshot row
+  // by the writer; today is derived live from the food log.
   if (ref.read(devModeProvider)) {
     // We only have mock food entries for today, so this returns 0 or 1.
-    final r = ref.read(nutritionRatioProvider);
+    final r = ref.read(todayNutritionRatioProvider);
     return r >= ratioThreshold ? 1 : 0;
   }
   final session = ref.read(sessionProvider);
   if (session == null) return 0;
+  int count = 0;
   try {
-    final rows = await SupabaseService.client
+    var q = SupabaseService.client
         .from('daily_score_snapshots')
-        .select('nutrition_ratio')
+        .select('id')
         .eq('user_id', session.user.id)
+        .lt('date', _todayKey())
         .gte('nutrition_ratio', ratioThreshold);
-    return (rows as List).length;
-  } catch (_) {
-    return 0;
-  }
+    if (since != null) q = q.gte('date', since);
+    count = (await q as List).length;
+  } catch (_) {}
+  if (ref.read(todayNutritionRatioProvider) >= ratioThreshold) count++;
+  return count;
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -210,15 +268,13 @@ String describePrereq(LevelPrereq p, List<Habit> habits) {
     return h?.name ?? 'this habit';
   }
 
-  switch (p.kind) {
-    case PrereqKind.habitCompletions:
-      return '${p.targetCount} ${habitName()} sessions';
-    case PrereqKind.streakDays:
-      return '${p.targetDays}-day streak on ${habitName()}';
-    case PrereqKind.perfectDays:
-      return '${p.targetCount} days at ≥${p.scoreThreshold}% score';
-    case PrereqKind.nutritionDays:
-      final pct = (p.ratioThreshold * 100).round();
-      return '${p.targetCount} days at ≥$pct% nutrition';
-  }
+  final base = switch (p.kind) {
+    PrereqKind.habitCompletions => '${p.targetCount} ${habitName()} sessions',
+    PrereqKind.streakDays => '${p.targetDays}-day streak on ${habitName()}',
+    PrereqKind.perfectDays => '${p.targetCount} days at ≥${p.scoreThreshold}% score',
+    PrereqKind.nutritionDays =>
+      '${p.targetCount} days at ≥${(p.ratioThreshold * 100).round()}% nutrition',
+  };
+  final w = p.windowDays;
+  return w == null ? base : '$base · in $w days';
 }

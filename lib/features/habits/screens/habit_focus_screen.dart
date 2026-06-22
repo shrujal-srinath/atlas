@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/atlas_controls.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../shared/models/models.dart';
 import '../providers/habit_provider.dart';
@@ -163,18 +164,12 @@ class _HabitFocusScreenState extends ConsumerState<HabitFocusScreen> {
     return '$m:$s';
   }
 
-  Color _sectionColor(HabitSection s, AppPalette c) => switch (s) {
-        HabitSection.athletic => c.athletic,
-        HabitSection.body => c.body,
-        HabitSection.mind => c.mind,
-      };
-
   @override
   Widget build(BuildContext context) {
     final c = context.c;
     final t = context.t;
     final h = _habit;
-    final accent = h == null ? c.accent : _sectionColor(h.section, c);
+    final accent = h == null ? c.accent : h.section.color(c);
     final pct = _totalSec == 0 ? 0.0 : (1.0 - _remainingSec / _totalSec);
 
     return Scaffold(
@@ -272,51 +267,21 @@ class _HabitFocusScreenState extends ConsumerState<HabitFocusScreen> {
                 Row(
                   children: [
                     Expanded(
-                      child: OutlinedButton.icon(
+                      child: AtlasButton(
+                        label: 'Stop',
+                        icon: LucideIcons.square,
+                        variant: AtlasButtonVariant.secondary,
                         onPressed: _saving ? null : _stopEarly,
-                        icon: Icon(LucideIcons.square, size: 16, color: c.textPrimary),
-                        label: Text(
-                          'Stop',
-                          style: TextStyle(
-                            fontFamily: 'Inter',
-                            fontWeight: FontWeight.w700,
-                            color: c.textPrimary,
-                          ),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: c.border),
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(AppRadii.button),
-                          ),
-                        ),
                       ),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: FilledButton.icon(
-                        onPressed: _saving
-                            ? null
-                            : (_running ? _pause : _start),
-                        icon: Icon(
-                          _running ? LucideIcons.pause : LucideIcons.play,
-                          size: 16,
-                        ),
-                        label: Text(
-                          _running ? 'Pause' : 'Resume',
-                          style: const TextStyle(
-                            fontFamily: 'Inter',
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: accent,
-                          foregroundColor: c.onAccent,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(AppRadii.button),
-                          ),
-                        ),
+                      child: AtlasButton(
+                        label: _running ? 'Pause' : 'Resume',
+                        icon: _running ? LucideIcons.pause : LucideIcons.play,
+                        color: accent,
+                        onPressed:
+                            _saving ? null : (_running ? _pause : _start),
                       ),
                     ),
                   ],

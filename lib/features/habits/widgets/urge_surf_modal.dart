@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/atlas_controls.dart';
 import '../../../shared/models/models.dart';
 import '../providers/habit_provider.dart';
 
@@ -184,48 +185,25 @@ class _UrgeSurfSheetState extends ConsumerState<_UrgeSurfSheet>
             Row(
               children: [
                 Expanded(
-                  child: OutlinedButton.icon(
-                    icon: Icon(LucideIcons.x, size: 16, color: c.textSecondary),
-                    label: Text(
-                      'Cancel',
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontWeight: FontWeight.w600,
-                        color: c.textSecondary,
-                      ),
-                    ),
+                  child: AtlasButton(
+                    label: 'Cancel',
+                    icon: LucideIcons.x,
+                    variant: AtlasButtonVariant.secondary,
+                    height: 50,
                     onPressed: () =>
                         Navigator.pop(context, UrgeOutcome.dismissed),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: c.border),
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadii.button),
-                      ),
-                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: OutlinedButton.icon(
-                    icon: Icon(LucideIcons.zap, size: 16, color: c.amber),
-                    label: Text(
-                      'I gave in',
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontWeight: FontWeight.w600,
-                        color: c.amber,
-                      ),
-                    ),
+                  child: AtlasButton(
+                    label: 'I gave in',
+                    icon: LucideIcons.zap,
+                    variant: AtlasButtonVariant.tonal,
+                    color: c.amber,
+                    height: 50,
                     onPressed: () =>
                         Navigator.pop(context, UrgeOutcome.gaveIn),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: c.amber.withValues(alpha: 0.4)),
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadii.button),
-                      ),
-                    ),
                   ),
                 ),
               ],
@@ -234,48 +212,24 @@ class _UrgeSurfSheetState extends ConsumerState<_UrgeSurfSheet>
             Row(
               children: [
                 Expanded(
-                  child: OutlinedButton.icon(
-                    icon: Icon(LucideIcons.zap, size: 16, color: c.amber),
-                    label: Text(
-                      'I gave in',
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontWeight: FontWeight.w600,
-                        color: c.amber,
-                      ),
-                    ),
+                  child: AtlasButton(
+                    label: 'I gave in',
+                    icon: LucideIcons.zap,
+                    variant: AtlasButtonVariant.tonal,
+                    color: c.amber,
+                    height: 50,
                     onPressed: () =>
                         Navigator.pop(context, UrgeOutcome.gaveIn),
-                    style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: c.amber.withValues(alpha: 0.4)),
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadii.button),
-                      ),
-                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: FilledButton.icon(
-                    icon: Icon(LucideIcons.check, size: 16, color: c.onAccent),
-                    label: Text(
-                      'I surfed it',
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontWeight: FontWeight.w600,
-                        color: c.onAccent,
-                      ),
-                    ),
+                  child: AtlasButton(
+                    label: 'I surfed it',
+                    icon: LucideIcons.check,
+                    height: 50,
                     onPressed: () =>
                         Navigator.pop(context, UrgeOutcome.surfed),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: c.accent,
-                      padding: const EdgeInsets.symmetric(vertical: 13),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(AppRadii.button),
-                      ),
-                    ),
                   ),
                 ),
               ],

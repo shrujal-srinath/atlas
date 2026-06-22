@@ -4,11 +4,9 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_theme.dart';
 import '../providers/food_providers.dart';
 import '../providers/health_score_providers.dart';
-import '../providers/macro_trend_provider.dart';
 import '../scoring/nutrition_score.dart';
 import 'calorie_ring.dart';
 import 'health_score_chip.dart';
-import 'macro_sparkline.dart';
 
 enum HeroVariant { home, diary }
 
@@ -57,7 +55,7 @@ class HeroNutritionCard extends ConsumerWidget {
                   style: AppType.overline.copyWith(
                       color: c.textMuted, letterSpacing: 1.2)),
               const SizedBox(width: 8),
-              _PhasePill(phase: phase),
+              PhasePill(phase: phase),
               const Spacer(),
               HealthScoreChip(score: score, large: !isHome),
             ],
@@ -98,25 +96,21 @@ class HeroNutritionCard extends ConsumerWidget {
           if (!isHome) ...[
             const SizedBox(height: 14),
             _MacroRow(
-                kind: MacroKind.protein,
                 label: 'Protein',
                 value: totals.proteinG,
                 target: targets.proteinG,
                 tint: c.athletic),
             _MacroRow(
-                kind: MacroKind.carbs,
                 label: 'Carbs',
                 value: totals.carbsG,
                 target: targets.carbsG,
                 tint: c.amber),
             _MacroRow(
-                kind: MacroKind.fat,
                 label: 'Fat',
                 value: totals.fatG,
                 target: targets.fatG,
                 tint: c.mind),
             _MacroRow(
-                kind: MacroKind.fiber,
                 label: 'Fiber',
                 value: totals.fiberG,
                 target: targets.micros.fiberG,
@@ -170,8 +164,8 @@ class _FullBudget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final delta = _phaseDelta(phase, consumed: consumed, target: target);
-    final tint = _resolveDeltaColor(c, delta.tone);
+    final delta = phaseDelta(phase, consumed: consumed, target: target);
+    final tint = resolveDeltaColor(c, delta.tone);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -202,7 +196,7 @@ class _FullBudget extends StatelessWidget {
         ),
         const SizedBox(height: 10),
         Text(
-          _phaseHint(phase, consumed: consumed, target: target),
+          phaseHint(phase, consumed: consumed, target: target),
           style: TextStyle(
             fontFamily: 'Inter',
             fontSize: 11,
@@ -228,43 +222,43 @@ class _FullBudget extends StatelessWidget {
 }
 
 // Phase-aware deficit/surplus label + tone.
-enum _DeltaTone { positive, warn, negative, neutral }
+enum DeltaTone { positive, warn, negative, neutral }
 
-class _PhaseDelta {
+class PhaseDelta {
   final String label;
   final String value;
-  final _DeltaTone tone;
-  const _PhaseDelta(this.label, this.value, this.tone);
+  final DeltaTone tone;
+  const PhaseDelta(this.label, this.value, this.tone);
 }
 
-_PhaseDelta _phaseDelta(BodyPhase phase,
+PhaseDelta phaseDelta(BodyPhase phase,
     {required double consumed, required double target}) {
   final remaining = (target - consumed).round();
   switch (phase) {
     case BodyPhase.bulk:
       // Bulking — under is bad, over is the goal.
       if (consumed < target) {
-        return _PhaseDelta('Need', '$remaining more', _DeltaTone.warn);
+        return PhaseDelta('Need', '$remaining more', DeltaTone.warn);
       }
       final over = (consumed - target).round();
-      return _PhaseDelta('Surplus', '+$over', _DeltaTone.positive);
+      return PhaseDelta('Surplus', '+$over', DeltaTone.positive);
     case BodyPhase.cut:
       // Cutting — under is good, over is bad.
       if (consumed <= target) {
-        return _PhaseDelta('Remaining', '$remaining', _DeltaTone.positive);
+        return PhaseDelta('Remaining', '$remaining', DeltaTone.positive);
       }
       final over = (consumed - target).round();
-      return _PhaseDelta('Over', '$over', _DeltaTone.negative);
+      return PhaseDelta('Over', '$over', DeltaTone.negative);
     case BodyPhase.maintain:
       if (consumed <= target) {
-        return _PhaseDelta('Remaining', '$remaining', _DeltaTone.neutral);
+        return PhaseDelta('Remaining', '$remaining', DeltaTone.neutral);
       }
       final over = (consumed - target).round();
-      return _PhaseDelta('Over', '$over', _DeltaTone.warn);
+      return PhaseDelta('Over', '$over', DeltaTone.warn);
   }
 }
 
-String _phaseHint(BodyPhase phase,
+String phaseHint(BodyPhase phase,
     {required double consumed, required double target}) {
   final pct = target <= 0 ? 0.0 : consumed / target;
   switch (phase) {
@@ -283,18 +277,18 @@ String _phaseHint(BodyPhase phase,
   }
 }
 
-Color _resolveDeltaColor(AppPalette c, _DeltaTone tone) {
+Color resolveDeltaColor(AppPalette c, DeltaTone tone) {
   return switch (tone) {
-    _DeltaTone.positive => c.accent,
-    _DeltaTone.warn => c.amber,
-    _DeltaTone.negative => c.negative,
-    _DeltaTone.neutral => c.textPrimary,
+    DeltaTone.positive => c.accent,
+    DeltaTone.warn => c.amber,
+    DeltaTone.negative => c.negative,
+    DeltaTone.neutral => c.textPrimary,
   };
 }
 
-class _PhasePill extends StatelessWidget {
+class PhasePill extends StatelessWidget {
   final BodyPhase phase;
-  const _PhasePill({required this.phase});
+  const PhasePill({super.key, required this.phase});
 
   @override
   Widget build(BuildContext context) {
@@ -354,7 +348,7 @@ class _CompactBudget extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final delta = _phaseDelta(phase, consumed: consumed, target: target);
+    final delta = phaseDelta(phase, consumed: consumed, target: target);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -363,7 +357,7 @@ class _CompactBudget extends StatelessWidget {
               ? 'on target'
               : '${delta.label}: ${delta.value} kcal',
           style: AppType.numLg.copyWith(
-            color: _resolveDeltaColor(c, delta.tone),
+            color: resolveDeltaColor(c, delta.tone),
             fontSize: 14,
           ),
         ),
@@ -419,15 +413,13 @@ class _CompactBudget extends StatelessWidget {
   }
 }
 
-// ── Macro row with sparkline (diary variant) ───────────────────────
+// ── Macro row — single full-width progress bar (diary variant) ─────
 
-class _MacroRow extends ConsumerWidget {
-  final MacroKind kind;
+class _MacroRow extends StatelessWidget {
   final String label;
   final double value, target;
   final Color tint;
   const _MacroRow({
-    required this.kind,
     required this.label,
     required this.value,
     required this.target,
@@ -435,15 +427,14 @@ class _MacroRow extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final c = context.c;
     final t = context.t;
     final pct = target <= 0 ? 0.0 : (value / target).clamp(0.0, 1.0);
     final over = target > 0 && value > target;
-    final trendAsync = ref.watch(macroTrend(kind, 7));
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: const EdgeInsets.symmetric(vertical: 7),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -462,38 +453,18 @@ class _MacroRow extends ConsumerWidget {
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Expanded(
-                flex: 5,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(99),
-                  child: Stack(
-                    children: [
-                      Container(height: 4, color: c.surfaceElevated),
-                      FractionallySizedBox(
-                        widthFactor: pct,
-                        child: Container(height: 4, color: tint),
-                      ),
-                    ],
-                  ),
+          const SizedBox(height: 7),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(99),
+            child: Stack(
+              children: [
+                Container(height: 5, color: c.surfaceElevated),
+                FractionallySizedBox(
+                  widthFactor: pct,
+                  child: Container(height: 5, color: over ? c.negative : tint),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                flex: 3,
-                child: trendAsync.maybeWhen(
-                  data: (tr) => MacroSparkline(
-                    values: tr.values,
-                    target: tr.target,
-                    tint: tint,
-                    height: 18,
-                  ),
-                  orElse: () => const SizedBox(height: 18),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),

@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../core/theme/app_theme.dart';
+import '../../shared/widgets/atlas_controls.dart';
+import '../../shared/widgets/app_snackbar.dart';
 import '../../shared/models/models.dart';
 import '../../shared/services/supabase_service.dart';
 import '../auth/providers/auth_provider.dart';
@@ -231,14 +233,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
 
       if (mounted) context.go('/home');
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not save: $e'),
-            backgroundColor: context.c.negative,
-          ),
-        );
-      }
+      if (mounted) showErrorSnack(context, e);
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
@@ -304,51 +299,33 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               ),
               child: Row(
                 children: [
-                  if (_step > 0)
-                    OutlinedButton(
-                      onPressed: _submitting ? null : _back,
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(color: c.border),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 18, vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius:
-                              BorderRadius.circular(AppRadii.button),
+                  if (_step > 0) ...[
+                    PressScale(
+                      scale: 0.96,
+                      onTap: () {
+                        if (!_submitting) _back();
+                      },
+                      child: Container(
+                        width: 52,
+                        height: 52,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: c.surface,
+                          borderRadius: BorderRadius.circular(AppRadii.button),
+                          border: Border.all(color: c.borderStrong, width: 1),
+                          boxShadow: AppShadows.card,
                         ),
+                        child: Icon(LucideIcons.arrowLeft,
+                            size: 18, color: c.textSecondary),
                       ),
-                      child: Icon(LucideIcons.arrowLeft,
-                          size: 16, color: c.textSecondary),
                     ),
-                  if (_step > 0) const SizedBox(width: 10),
+                    const SizedBox(width: 10),
+                  ],
                   Expanded(
-                    child: FilledButton(
-                      onPressed: _submitting || !_canAdvance() ? null : _next,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: c.accent,
-                        foregroundColor: c.onAccent,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                          borderRadius:
-                              BorderRadius.circular(AppRadii.button),
-                        ),
-                      ),
-                      child: _submitting
-                          ? SizedBox(
-                              height: 18,
-                              width: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: c.onAccent,
-                              ),
-                            )
-                          : Text(
-                              _step == _totalSteps - 1 ? 'Finish' : 'Continue',
-                              style: const TextStyle(
-                                fontFamily: 'Inter',
-                                fontWeight: FontWeight.w600,
-                                fontSize: 14,
-                              ),
-                            ),
+                    child: AtlasButton(
+                      label: _step == _totalSteps - 1 ? 'Finish' : 'Continue',
+                      loading: _submitting,
+                      onPressed: _canAdvance() ? _next : null,
                     ),
                   ),
                 ],
@@ -455,7 +432,7 @@ class _StepName extends StatelessWidget {
             controller: controller,
             autofocus: true,
             style: t.body,
-            decoration: const InputDecoration(hintText: 'Shrujal'),
+            decoration: const InputDecoration(hintText: 'Your name'),
           ),
           const SizedBox(height: 22),
           Container(
