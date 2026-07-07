@@ -15,17 +15,30 @@ const double kOvershootCap = 1.10;
 /// Ratios below this don't earn XP — prevents "tap +1 once" XP farming.
 const double kMinRatioForXp = 0.05;
 
-/// Returns a task's completion ratio in `[0, kOvershootCap]`.
+/// A negative ("avoid") habit is **clean by default** — it earns full credit
+/// every day unless the user logs a slip. A slip (`completed == false`) drags
+/// the day *below* baseline by contributing this negative ratio, so breaking a
+/// quit-habit actively costs score/XP (not merely zero). Tunable.
+const double kNegativeSlipRatio = -1.0;
+
+/// Returns a task's completion ratio.
 ///
-/// - `log == null` → 0.0
-/// - Negative habits and todos → binary on `log.completed`
+/// - **Negative habits**: clean by default → `+1.0` when there's no log or a
+///   "stayed clean" log; a slip (`completed == false`) → [kNegativeSlipRatio].
+/// - `log == null` (non-negative) → 0.0
+/// - Todos → binary on `log.completed`
 /// - Positive habits without a numeric goal → binary on `log.completed`
 /// - Numeric positive habits → `(actualValue ?? (completed ? goalValue : 0)) / goalValue`,
 ///   clamped to `[0, kOvershootCap]`. Legacy logs (no `actualValue`, `completed = true`)
 ///   resolve to exactly `1.0`.
 double taskRatio(Habit habit, HabitLog? log) {
+  if (habit.type == HabitType.negative) {
+    // Clean unless explicitly logged as a slip.
+    if (log == null) return 1.0;
+    return log.completed ? 1.0 : kNegativeSlipRatio;
+  }
   if (log == null) return 0.0;
-  if (habit.type == HabitType.negative || habit.type == HabitType.todo) {
+  if (habit.type == HabitType.todo) {
     return log.completed ? 1.0 : 0.0;
   }
   final goal = habit.goalValue;
@@ -134,8 +147,9 @@ ScoreBreakdown computeScore({
   };
   for (final t in tasks) {
     final w = weightsFor(t.habit.priority).score;
-    perSectionDenom[t.habit.section] = perSectionDenom[t.habit.section]! + w;
-    perSectionTasks[t.habit.section]!.add(t);
+    final sec = t.habit.sectionId.toSectionEnum();
+    perSectionDenom[sec] = perSectionDenom[sec]! + w;
+    perSectionTasks[sec]!.add(t);
   }
 
   // Per-task ratio + contribution; per-section accumulators.
@@ -224,4 +238,99 @@ Map<HabitSection, double> normalizeSectionWeights(Map<String, dynamic>? raw) {
     HabitSection.mind: m / sum,
     HabitSection.body: b / sum,
   };
+}
+
+// ════════════════════════════════════════════════════════════════════
+// Full day score (habits + nutrition blend)
+// ════════════════════════════════════════════════════════════════════
+
+/// Default share of the body section driven by nutrition adherence (the rest
+/// is body habits). Lives here so the live home score and the stats series
+/// blend the body section identically — one source of truth, no drift.
+const double kDefaultNutritionWeight = 0.5;
+
+/// A fully-computed day score: the section-weighted, priority-weighted habit
+/// score with the body section optionally blended with that day's nutrition
+/// adherence. Produced by [computeDayScore].
+class ScoredDay {
+  final int score; // 0..100
+  final int projectedScore; // 0..100, if remaining tasks complete
+  final Map<HabitSection, int> sectionPct; // 0..110 per section
+  final int done;
+  final int total;
+  final List<TaskContribution> perTaskContrib;
+  const ScoredDay({
+    required this.score,
+    required this.projectedScore,
+    required this.sectionPct,
+    required this.done,
+    required this.total,
+    required this.perTaskContrib,
+  });
+
+  static const ScoredDay empty = ScoredDay(
+    score: 0,
+    projectedScore: 0,
+    sectionPct: {
+      HabitSection.athletic: 0,
+      HabitSection.mind: 0,
+      HabitSection.body: 0,
+    },
+    done: 0,
+    total: 0,
+    perTaskContrib: [],
+  );
+}
+
+/// Runs [computeScore] then blends the body section with [nutritionRatio]
+/// (0..1; `null` = habit-only, e.g. future days). [nutritionWeight] is the
+/// fraction of the body section that nutrition occupies. Pure + deterministic.
+ScoredDay computeDayScore({
+  required List<ScoredTaskInput> tasks,
+  required Map<HabitSection, double> sectionWeights,
+  double? nutritionRatio,
+  double nutritionWeight = kDefaultNutritionWeight,
+}) {
+  if (tasks.isEmpty) return ScoredDay.empty;
+  final b = computeScore(tasks: tasks, sectionWeights: sectionWeights);
+
+  double bodyRatio = b.sectionRatio[HabitSection.body] ?? 0;
+  double bodyProjected = b.sectionPotential[HabitSection.body] ?? 0;
+  if (nutritionRatio != null) {
+    bodyRatio =
+        bodyRatio * (1 - nutritionWeight) + nutritionRatio * nutritionWeight;
+    bodyProjected =
+        bodyProjected * (1 - nutritionWeight) + 1.0 * nutritionWeight;
+  }
+
+  final athRatio = b.sectionRatio[HabitSection.athletic] ?? 0;
+  final mindRatio = b.sectionRatio[HabitSection.mind] ?? 0;
+  final wAth = sectionWeights[HabitSection.athletic] ?? 0;
+  final wMind = sectionWeights[HabitSection.mind] ?? 0;
+  final wBody = sectionWeights[HabitSection.body] ?? 0;
+
+  final score =
+      ((athRatio * wAth + mindRatio * wMind + bodyRatio * wBody) * 100)
+          .round()
+          .clamp(0, 100);
+  final projected =
+      ((athRatio * wAth + mindRatio * wMind + bodyProjected * wBody) * 100)
+          .round()
+          .clamp(0, 100);
+
+  return ScoredDay(
+    score: score,
+    projectedScore: projected,
+    sectionPct: {
+      HabitSection.athletic: ((b.sectionRatio[HabitSection.athletic] ?? 0) * 100)
+          .round()
+          .clamp(0, 110),
+      HabitSection.mind:
+          ((b.sectionRatio[HabitSection.mind] ?? 0) * 100).round().clamp(0, 110),
+      HabitSection.body: (bodyRatio * 100).round().clamp(0, 110),
+    },
+    done: b.doneCount,
+    total: b.totalCount,
+    perTaskContrib: b.perTaskContrib,
+  );
 }

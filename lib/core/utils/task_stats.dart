@@ -101,7 +101,10 @@ TaskStats computeTaskStats({
     for (final l in logs)
       if (l.completed) l.date,
   };
-  bool scheduledOn(DateTime d) => habit.daysOfWeek.contains(d.weekday);
+  // Days before the habit existed aren't "scheduled" — they must not dilute the
+  // completion rate or blank out streak bars as if the habit were missed then.
+  bool scheduledOn(DateTime d) =>
+      habit.existedOn(d) && habit.daysOfWeek.contains(d.weekday);
 
   // ── Headline rate + weekday split over the trailing window ──────────
   final windowDays = range.windowDays;
@@ -126,7 +129,7 @@ TaskStats computeTaskStats({
   ];
 
   // ── Streaks ─────────────────────────────────────────────────────────
-  final current = calculateStreak(habit, logs);
+  final current = calculateStreak(habit, logs, now: today);
   int best = 0, run = 0;
   for (int i = 0; i < 366; i++) {
     final d = today.subtract(Duration(days: i));

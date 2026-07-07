@@ -5,6 +5,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/models.dart';
+import '../../home/scoring/section_def.dart';
 import '../../../shared/widgets/atlas_back_button.dart';
 import '../../habits/providers/habit_provider.dart';
 import '../../home/providers/home_providers.dart';
@@ -218,12 +219,6 @@ class _BreakdownCard extends StatelessWidget {
   final Map<HabitSection, double> weights; // fractions summing to ~1.0
   const _BreakdownCard({required this.score, required this.weights});
 
-  static const _labels = {
-    HabitSection.athletic: 'Athletic',
-    HabitSection.mind: 'Mind',
-    HabitSection.body: 'Body',
-  };
-
   int _weightPct(HabitSection s) => ((weights[s] ?? 0) * 100).round();
 
   double _contribution(HabitSection s) {
@@ -253,7 +248,7 @@ class _BreakdownCard extends StatelessWidget {
               pct: score?.sectionPct[HabitSection.values[i]] ?? 0,
               weightPct: _weightPct(HabitSection.values[i]),
               contribution: _contribution(HabitSection.values[i]).round(),
-              label: _labels[HabitSection.values[i]]!,
+              label: HabitSection.values[i].label,
               color: HabitSection.values[i].color(context.c),
             ),
             if (i < HabitSection.values.length - 1) const SizedBox(height: 11),
@@ -464,7 +459,7 @@ class _ContribRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     final h = contrib.habit;
-    final color = h.section.color(context.c);
+    final color = h.sectionId.sectionColor(context.c);
     final done = contrib.isCompleted;
     final muted = contrib.ratio < 0.01;
     return InkWell(
@@ -753,7 +748,7 @@ class _PeakCard extends StatelessWidget {
           for (int i = 0; i < rows.length; i++) ...[
             _PeakRow(
               row: rows[i],
-              color: rows[i].habit.section.color(context.c),
+              color: rows[i].habit.sectionId.sectionColor(context.c),
               onTap: () => onTapHabit(rows[i].habit, rows[i].log),
             ),
             if (i < rows.length - 1)

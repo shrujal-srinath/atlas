@@ -1,5 +1,35 @@
 enum HabitSection { athletic, mind, body }
 
+/// The three permanent built-in section ids (equal to the enum names). Custom
+/// section ids are arbitrary slugs. Defined here (pure) so the scoring engine
+/// can reference them without a Flutter dependency.
+const String kAthleticId = 'athletic';
+const String kMindId = 'mind';
+const String kBodyId = 'body';
+const List<String> kBuiltInSectionIds = [kAthleticId, kMindId, kBodyId];
+
+bool isBuiltInSection(String id) => kBuiltInSectionIds.contains(id);
+
+/// Custom section id → its built-in parent id (for scoring roll-up) and the
+/// score-weight key. Kept in sync by `focusConfigProvider` from the registry so
+/// the pure engine and [SectionIdToEnum] can resolve a custom section's parent.
+Map<String, String> kSectionParentById = <String, String>{};
+
+/// Section id → display name, kept in sync by `focusConfigProvider` from the
+/// stored section registry (built-in renames AND custom sections). Read by
+/// [HabitSectionParse.label] and [sectionNameOf] so a name shows everywhere
+/// without threading the provider through every widget. Empty = canonical.
+Map<String, String> kSectionNameById = <String, String>{};
+
+/// Display name for any section id (built-in or custom). Falls back to a
+/// title-cased id when the registry hasn't named it.
+String sectionNameOf(String id) {
+  final n = kSectionNameById[id];
+  if (n != null && n.isNotEmpty) return n;
+  if (id.isEmpty) return id;
+  return id[0].toUpperCase() + id.substring(1);
+}
+
 extension HabitSectionParse on HabitSection {
   /// Map legacy `building` and `breaking` values from existing data to
   /// `mind` and `body`. New rows store the new names directly.
@@ -11,11 +41,97 @@ extension HabitSectionParse on HabitSection {
       _ => HabitSection.athletic,
     };
   }
+
+  /// Display name, used app-wide. Honours the user's rename ([kSectionNameById])
+  /// and falls back to the canonical name. Single source of truth — don't
+  /// re-spell these in screen `switch`es.
+  String get label => kSectionNameById[name] ?? defaultLabel;
+
+  /// The built-in name, ignoring any rename.
+  String get defaultLabel => switch (this) {
+        HabitSection.athletic => 'Athletic',
+        HabitSection.mind => 'Mind',
+        HabitSection.body => 'Body',
+      };
+
+  /// Stable id for the section (equal to the enum name) — the value stored on a
+  /// habit's `section` and used as the key throughout the dynamic-sections
+  /// system.
+  String get id => name;
+}
+
+/// Bridge a section id to a built-in [HabitSection] for the (still enum-keyed)
+/// scoring: built-in ids map directly; a custom section rolls up to its parent
+/// built-in (via [kSectionParentById]) so its habits count toward that core
+/// section's weight.
+extension SectionIdToEnum on String {
+  HabitSection toSectionEnum() =>
+      HabitSectionParse.fromDb(kSectionParentById[this] ?? this);
+}
+
+/// Normalise a raw stored `section` value to a section id, mapping the legacy
+/// `building`/`breaking` names. Custom section ids pass through untouched.
+String normalizeSectionId(String? raw) {
+  final v = (raw ?? 'athletic').toLowerCase().trim();
+  return switch (v) {
+    'building' => 'mind',
+    'breaking' => 'body',
+    '' => 'athletic',
+    _ => v,
+  };
 }
 
 enum HabitType { positive, negative, todo }
 
 enum GoalType { reps, durationMin, distanceKm, litres, custom }
+
+// ── Goal units ────────────────────────────────────────────────────────
+// A goal's numeric value is always stored in a canonical base (minutes for
+// duration, km for distance, L for volume); `Habit.goalUnit` records the unit
+// the user picked so we can show "8 hr" instead of "480 min". One source of
+// truth shared by the goal sheet, creation screen, and home cards.
+
+/// Selectable display units for a goal type. First entry is the canonical base.
+/// Empty when the type carries a free-text unit (custom) or has no alternates.
+List<String> goalUnitsFor(GoalType t) => switch (t) {
+      GoalType.reps => const [],
+      GoalType.durationMin => const ['min', 'hr'],
+      GoalType.distanceKm => const ['km', 'mi'],
+      GoalType.litres => const ['L', 'ml'],
+      GoalType.custom => const [],
+    };
+
+const double _kMiPerKm = 1.609344;
+
+/// Convert a value the user typed in [unit] into the canonical base.
+double goalToCanonical(GoalType t, String? unit, double display) =>
+    switch (t) {
+      GoalType.durationMin when unit == 'hr' => display * 60,
+      GoalType.distanceKm when unit == 'mi' => display * _kMiPerKm,
+      GoalType.litres when unit == 'ml' => display / 1000,
+      _ => display,
+    };
+
+/// Inverse of [goalToCanonical] — canonical base → the value shown in [unit].
+double goalFromCanonical(GoalType t, String? unit, double canonical) =>
+    switch (t) {
+      GoalType.durationMin when unit == 'hr' => canonical / 60,
+      GoalType.distanceKm when unit == 'mi' => canonical / _kMiPerKm,
+      GoalType.litres when unit == 'ml' => canonical * 1000,
+      _ => canonical,
+    };
+
+/// The unit label to display for a goal (custom uses its own free-text unit).
+String goalUnitLabel(GoalType t, String? unit) {
+  if (unit != null && unit.isNotEmpty) return unit;
+  return switch (t) {
+    GoalType.reps => 'reps',
+    GoalType.durationMin => 'min',
+    GoalType.distanceKm => 'km',
+    GoalType.litres => 'L',
+    GoalType.custom => 'units',
+  };
+}
 
 enum FrequencyMode { everyDay, specificDays, timesPerWeek }
 
@@ -80,6 +196,31 @@ class AppUser {
   // [dailyCalorieTarget] by `resolveMealTargets` / `mealTargetsProvider`.
   final Map<String, dynamic>? mealCalorieTargetsJson;
 
+  /// Raw `nutrition_prefs` JSONB — drives the goal-based nutrition engine.
+  /// Shape: {timeline_days:int, protein_plan:text, protein_per_kg:num,
+  /// fat_plan:text, fat_pct:num, kcal_override:int}. All keys optional; read via
+  /// the typed accessors below and consumed by `nutritionPlanForUser`.
+  final Map<String, dynamic>? nutritionPrefsRaw;
+
+  /// User-chosen goal timeline (days) from the onboarding pace slider, if set.
+  /// Kept for back-compat + display; [weeklyRateKg] is the authoritative pace.
+  int? get timelineDays => (nutritionPrefsRaw?['timeline_days'] as num?)?.toInt();
+
+  /// Authoritative pace from the slider — *signed* weekly weight change
+  /// (+ gain / − loss), kg/week. The live engine drives calories from this so
+  /// the saved plan matches exactly what the user dialled in. Null on legacy
+  /// profiles (fall back to [timelineDays]).
+  double? get weeklyRateKg =>
+      (nutritionPrefsRaw?['weekly_rate_kg'] as num?)?.toDouble();
+
+  /// Manual calorie override (goal-settings screen), if the user pinned one.
+  int? get kcalOverride => (nutritionPrefsRaw?['kcal_override'] as num?)?.toInt();
+
+  /// Manual water-goal override (ml) set in the Water goal editor, if any —
+  /// otherwise the engine's weight/activity-derived target is used.
+  int? get waterOverrideMl =>
+      (nutritionPrefsRaw?['water_override_ml'] as num?)?.toInt();
+
   const AppUser({
     required this.id,
     required this.name,
@@ -105,6 +246,7 @@ class AppUser {
     this.isOnboarded = true,
     this.sectionWeightsJson,
     this.mealCalorieTargetsJson,
+    this.nutritionPrefsRaw,
   });
 
   factory AppUser.fromJson(Map<String, dynamic> j) => AppUser(
@@ -135,6 +277,8 @@ class AppUser {
             (j['section_weights'] as Map?)?.cast<String, dynamic>(),
         mealCalorieTargetsJson:
             (j['meal_calorie_targets'] as Map?)?.cast<String, dynamic>(),
+        nutritionPrefsRaw:
+            (j['nutrition_prefs'] as Map?)?.cast<String, dynamic>(),
       );
 }
 
@@ -143,11 +287,17 @@ class Habit {
   final String userId;
   final String name;
   final String icon;
-  final HabitSection section;
+  final String sectionId;
   final HabitType type;
   final List<int> daysOfWeek;
   final double? goalValue;
   final GoalType? goalType;
+
+  /// Display unit for the goal, e.g. 'min' | 'hr' | 'km' | 'mi' | 'L' | 'ml',
+  /// or a free-text label for a custom goal. [goalValue] is always stored in
+  /// the canonical base (minutes, km, L) so scoring/log math is unit-agnostic;
+  /// this only drives input conversion + display. Null → the type's default.
+  final String? goalUnit;
   final bool effortRatingEnabled;
   final bool noteEnabled;
   final String? skillCategory;
@@ -177,16 +327,23 @@ class Habit {
   /// [notificationPrefsRaw]). Null when the task has no food link.
   final Map<String, dynamic>? foodLinkRaw;
 
+  /// When the habit row was created (local time). A habit never affects any day
+  /// before this, so adding a new habit can't retroactively lower a past day's
+  /// score, streak, or completion stats. Null when unknown (e.g. bundled demo
+  /// data) → no lower bound. See [existedOn].
+  final DateTime? createdAt;
+
   const Habit({
     required this.id,
     required this.userId,
     required this.name,
     required this.icon,
-    required this.section,
+    required this.sectionId,
     required this.type,
     required this.daysOfWeek,
     this.goalValue,
     this.goalType,
+    this.goalUnit,
     required this.effortRatingEnabled,
     required this.noteEnabled,
     this.skillCategory,
@@ -208,6 +365,7 @@ class Habit {
     this.sortOrder = 0,
     this.priority = HabitPriority.normal,
     this.foodLinkRaw,
+    this.createdAt,
   });
 
   factory Habit.fromJson(Map<String, dynamic> j) => Habit(
@@ -215,11 +373,12 @@ class Habit {
         userId: j['user_id'] as String,
         name: j['name'] as String,
         icon: j['icon'] as String? ?? '⚡',
-        section: HabitSectionParse.fromDb(j['section'] as String?),
+        sectionId: normalizeSectionId(j['section'] as String?),
         type: HabitType.values.byName(j['type'] as String? ?? 'positive'),
         daysOfWeek: (j['days_of_week'] as List<dynamic>? ?? []).map((e) => e as int).toList(),
         goalValue: (j['goal_value'] as num?)?.toDouble(),
         goalType: j['goal_type'] != null ? GoalType.values.byName(j['goal_type'] as String) : null,
+        goalUnit: j['goal_unit'] as String?,
         effortRatingEnabled: j['effort_rating_enabled'] as bool? ?? false,
         noteEnabled: j['note_enabled'] as bool? ?? false,
         skillCategory: j['skill_category'] as String?,
@@ -249,6 +408,11 @@ class Habit {
         sortOrder: (j['sort_order'] as num?)?.toInt() ?? 0,
         priority: HabitPriorityParse.fromDb(j['priority'] as String?),
         foodLinkRaw: (j['food_link'] as Map?)?.cast<String, dynamic>(),
+        // Supabase returns `created_at` as a UTC timestamp — localize it so the
+        // "existed on day D" check compares against the user's local calendar.
+        createdAt: j['created_at'] != null
+            ? DateTime.parse(j['created_at'] as String).toLocal()
+            : null,
       );
 
   static FrequencyMode _parseFreq(String? s) => switch (s) {
@@ -279,11 +443,12 @@ class Habit {
         'user_id': userId,
         'name': name,
         'icon': icon,
-        'section': section.name,
+        'section': sectionId,
         'type': type.name,
         'days_of_week': daysOfWeek,
         if (goalValue != null) 'goal_value': goalValue,
         if (goalType != null) 'goal_type': goalType!.name,
+        if (goalUnit != null) 'goal_unit': goalUnit,
         'effort_rating_enabled': effortRatingEnabled,
         'note_enabled': noteEnabled,
         if (skillCategory != null) 'skill_category': skillCategory,
@@ -304,6 +469,23 @@ class Habit {
         'priority': priority.name,
         if (foodLinkRaw != null) 'food_link': foodLinkRaw,
       };
+
+  /// Local date-only day the habit began counting — its creation day. Null when
+  /// unknown (e.g. bundled demo data), which imposes no lower bound.
+  DateTime? get startDate {
+    final c = createdAt;
+    return c == null ? null : DateTime(c.year, c.month, c.day);
+  }
+
+  /// Whether the habit already existed on [date] (date-only). A habit never
+  /// affects a day before it was created, so a newly-added habit can't
+  /// retroactively lower a past day's score, streak, or completion stats. The
+  /// creation day itself counts.
+  bool existedOn(DateTime date) {
+    final s = startDate;
+    if (s == null) return true;
+    return !DateTime(date.year, date.month, date.day).isBefore(s);
+  }
 }
 
 class HabitLog {
@@ -321,6 +503,12 @@ class HabitLog {
   /// [completed] is true.
   final double? actualValue;
 
+  /// Deliberate **rest day** for a flexible-count ("X / week") habit — a neutral
+  /// skip: it's excluded from the day score, never breaks a streak, and earns no
+  /// XP (mirrors a non-scheduled day). Distinct from a plain incomplete day,
+  /// which still counts against the habit.
+  final bool restDay;
+
   const HabitLog({
     required this.id,
     required this.habitId,
@@ -332,6 +520,7 @@ class HabitLog {
     this.triggerTag,
     required this.urgeOnly,
     this.actualValue,
+    this.restDay = false,
   });
 
   factory HabitLog.fromJson(Map<String, dynamic> j) => HabitLog(
@@ -345,6 +534,7 @@ class HabitLog {
         triggerTag: j['trigger_tag'] as String?,
         urgeOnly: j['urge_only'] as bool? ?? false,
         actualValue: (j['actual_value'] as num?)?.toDouble(),
+        restDay: j['rest_day'] as bool? ?? false,
       );
 
   HabitLog copyWith({
@@ -354,6 +544,7 @@ class HabitLog {
     String? triggerTag,
     bool? urgeOnly,
     double? actualValue,
+    bool? restDay,
   }) =>
       HabitLog(
         id: id,
@@ -366,6 +557,7 @@ class HabitLog {
         triggerTag: triggerTag ?? this.triggerTag,
         urgeOnly: urgeOnly ?? this.urgeOnly,
         actualValue: actualValue ?? this.actualValue,
+        restDay: restDay ?? this.restDay,
       );
 }
 

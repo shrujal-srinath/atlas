@@ -9,6 +9,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/atlas_controls.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../shared/models/models.dart';
+import '../../home/scoring/section_def.dart';
 import '../providers/habit_provider.dart';
 
 /// Full-screen countdown timer for a single `durationMin` habit. Starts
@@ -169,7 +170,7 @@ class _HabitFocusScreenState extends ConsumerState<HabitFocusScreen> {
     final c = context.c;
     final t = context.t;
     final h = _habit;
-    final accent = h == null ? c.accent : h.section.color(c);
+    final accent = h == null ? c.accent : h.sectionId.sectionColor(c);
     final pct = _totalSec == 0 ? 0.0 : (1.0 - _remainingSec / _totalSec);
 
     return Scaffold(
@@ -183,7 +184,11 @@ class _HabitFocusScreenState extends ConsumerState<HabitFocusScreen> {
                 children: [
                   IconButton(
                     icon: Icon(LucideIcons.x, color: c.textSecondary),
-                    onPressed: _running ? _stopEarly : () => Navigator.pop(context),
+                    // Always route through _stopEarly — it already no-ops the
+                    // "log partial progress?" prompt when nothing has elapsed,
+                    // but paused progress deserves the same chance to be saved
+                    // that the dedicated Stop button already gives it.
+                    onPressed: _stopEarly,
                   ),
                   const Spacer(),
                   Text(

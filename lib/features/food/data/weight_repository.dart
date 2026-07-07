@@ -38,6 +38,44 @@ class WeightRepository {
     return WeightEntry.fromJson(inserted);
   }
 
+  /// Record [kg] for [date], updating that day's entry if one already exists
+  /// (else inserting). Keeps a single point per day so profile/goal weight
+  /// edits and Body-tab logs share one timeline without duplicates.
+  Future<WeightEntry> upsertForDate({
+    required double kg,
+    required DateTime date,
+    String? note,
+  }) async {
+    final userId = SupabaseService.auth.currentUser!.id;
+    final day = DateTime(date.year, date.month, date.day);
+    final ds =
+        '${day.year.toString().padLeft(4, '0')}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
+    try {
+      final rows = await SupabaseService.client
+          .from('body_weight_logs')
+          .select('id')
+          .eq('date', ds)
+          .limit(1);
+      final list = (rows as List);
+      if (list.isNotEmpty) {
+        final id = (list.first as Map)['id'] as String;
+        await OfflineWriter.update(
+          table: 'body_weight_logs',
+          id: id,
+          payload: {
+            'weight_kg': kg,
+            if (note != null && note.isNotEmpty) 'note': note,
+          },
+        );
+        return WeightEntry(
+            id: id, userId: userId, date: day, kg: kg, note: note);
+      }
+    } catch (_) {
+      // Offline / lookup failed — fall through to a plain insert.
+    }
+    return add(kg: kg, date: day, note: note);
+  }
+
   Future<void> delete(String id) async {
     await OfflineWriter.delete(table: 'body_weight_logs', id: id);
   }

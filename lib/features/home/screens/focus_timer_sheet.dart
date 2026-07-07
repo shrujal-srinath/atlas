@@ -222,7 +222,7 @@ class _PresetChip extends StatelessWidget {
         child: Text(
           '$minutes m',
           style: AppType.numMd.copyWith(
-            color: selected ? c.accent : c.textPrimary,
+            color: c.textPrimary,
           ),
         ),
       ),

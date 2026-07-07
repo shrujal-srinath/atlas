@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_theme.dart';
 import '../domain/meal_entry.dart';
+import '../food_colors.dart';
 import '../providers/food_providers.dart';
 import '../providers/weekly_totals_provider.dart';
 import '../../../shared/widgets/atlas_error.dart';
@@ -272,6 +273,8 @@ class _CalorieColumnsCard extends StatelessWidget {
               enabled: true,
               touchTooltipData: BarTouchTooltipData(
                 getTooltipColor: (_) => c.surfaceElevated,
+                fitInsideHorizontally: true,
+                fitInsideVertically: true,
                 tooltipPadding:
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
                 getTooltipItem: (group, _, rod, _) {
@@ -410,9 +413,31 @@ class _CalorieTrendCard extends StatelessWidget {
                       maxX: (week.length - 1).toDouble(),
                       minY: 0,
                       maxY: maxV <= 0 ? 100 : maxV,
+                      clipData: const FlClipData.all(),
                       lineTouchData: LineTouchData(
+                        getTouchedSpotIndicator: (barData, indexes) => [
+                          for (final _ in indexes)
+                            TouchedSpotIndicatorData(
+                              FlLine(
+                                color: (barData.color ?? c.accent)
+                                    .withValues(alpha: 0.30),
+                                strokeWidth: 1.5,
+                              ),
+                              FlDotData(
+                                getDotPainter: (s, p, b, i) =>
+                                    FlDotCirclePainter(
+                                  radius: 3.5,
+                                  color: b.color ?? c.accent,
+                                  strokeWidth: 2,
+                                  strokeColor: c.surface,
+                                ),
+                              ),
+                            ),
+                        ],
                         touchTooltipData: LineTouchTooltipData(
                           getTooltipColor: (_) => c.surfaceElevated,
+                          fitInsideHorizontally: true,
+                          fitInsideVertically: true,
                           getTooltipItems: (spots) => spots.map((s) {
                             final d = week[s.x.toInt()];
                             return LineTooltipItem(
@@ -485,6 +510,7 @@ class _CalorieTrendCard extends StatelessWidget {
                           spots: spots,
                           isCurved: true,
                           curveSmoothness: 0.2,
+                          preventCurveOverShooting: true,
                           color: c.accent,
                           barWidth: 2,
                           dotData: const FlDotData(show: false),
@@ -540,17 +566,17 @@ class _MacroDonutCard extends StatelessWidget {
                 sections: [
                   PieChartSectionData(
                     value: total <= 0 ? 1 : pKcal,
-                    color: total <= 0 ? c.surfaceElevated : c.athletic,
+                    color: total <= 0 ? c.surfaceElevated : c.proteinColor,
                     radius: 22, showTitle: false,
                   ),
                   PieChartSectionData(
                     value: total <= 0 ? 0 : cKcal,
-                    color: c.amber,
+                    color: c.carbsColor,
                     radius: 22, showTitle: false,
                   ),
                   PieChartSectionData(
                     value: total <= 0 ? 0 : fKcal,
-                    color: c.mind,
+                    color: c.fatColor,
                     radius: 22, showTitle: false,
                   ),
                 ],
@@ -562,11 +588,11 @@ class _MacroDonutCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _row(context, 'Protein', pPct, p / loggedDays, c.athletic),
+                _row(context, 'Protein', pPct, p / loggedDays, c.proteinColor),
                 const SizedBox(height: 8),
-                _row(context, 'Carbs', cPct, ca / loggedDays, c.amber),
+                _row(context, 'Carbs', cPct, ca / loggedDays, c.carbsColor),
                 const SizedBox(height: 8),
-                _row(context, 'Fat', fPct, f / loggedDays, c.mind),
+                _row(context, 'Fat', fPct, f / loggedDays, c.fatColor),
               ],
             ),
           ),
@@ -1050,6 +1076,8 @@ class _ProteinCard extends StatelessWidget {
           enabled: true,
           touchTooltipData: BarTouchTooltipData(
             getTooltipColor: (_) => c.surfaceElevated,
+            fitInsideHorizontally: true,
+            fitInsideVertically: true,
             tooltipPadding:
                 const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
             getTooltipItem: (group, _, rod, _) {
@@ -1146,9 +1174,29 @@ class _ProteinCard extends StatelessWidget {
         maxX: (week.length - 1).toDouble(),
         minY: 0,
         maxY: maxV <= 0 ? 100 : maxV,
+        clipData: const FlClipData.all(),
         lineTouchData: LineTouchData(
+          getTouchedSpotIndicator: (barData, indexes) => [
+            for (final _ in indexes)
+              TouchedSpotIndicatorData(
+                FlLine(
+                  color: (barData.color ?? c.accent).withValues(alpha: 0.30),
+                  strokeWidth: 1.5,
+                ),
+                FlDotData(
+                  getDotPainter: (s, p, b, i) => FlDotCirclePainter(
+                    radius: 3.5,
+                    color: b.color ?? c.accent,
+                    strokeWidth: 2,
+                    strokeColor: c.surface,
+                  ),
+                ),
+              ),
+          ],
           touchTooltipData: LineTouchTooltipData(
             getTooltipColor: (_) => c.surfaceElevated,
+            fitInsideHorizontally: true,
+            fitInsideVertically: true,
             getTooltipItems: (s) => s.map((spot) {
               final d = week[spot.x.toInt()];
               return LineTooltipItem(
@@ -1216,6 +1264,7 @@ class _ProteinCard extends StatelessWidget {
             spots: spots,
             isCurved: true,
             curveSmoothness: 0.2,
+            preventCurveOverShooting: true,
             color: c.athletic,
             barWidth: 2,
             dotData: const FlDotData(show: false),

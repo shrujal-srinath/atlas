@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/dev/dev_mode.dart';
 import '../domain/meal_entry.dart';
 import 'food_providers.dart';
 
@@ -33,6 +34,23 @@ final streakProvider = FutureProvider.autoDispose<List<DayLog>>((ref) async {
   final n = DateTime.now();
   final today = DateTime(n.year, n.month, n.day);
   final start = today.subtract(const Duration(days: 6));
+
+  // Demo/dev: no Supabase session, so fabricate a believable week so the strip
+  // and fueling calendar look alive instead of empty.
+  if (ref.watch(devModeProvider)) {
+    const ratios = [0.92, 1.04, 0.7, 1.0, 0.0, 0.96, 0.62]; // oldest → today
+    final t = targets.kcal;
+    return [
+      for (int i = 0; i < 7; i++)
+        DayLog(
+          date: start.add(Duration(days: i)),
+          state: _classify(ratios[i] * t, t, ratios[i] > 0),
+          kcal: ratios[i] * t,
+          targetKcal: t,
+        ),
+    ];
+  }
+
   final bucketed = await repo.entriesForRange(start, today);
 
   final out = <DayLog>[];
@@ -65,6 +83,22 @@ final monthCaloriesProvider =
   ref.watch(diaryDateProvider);
   final first = DateTime(month.year, month.month, 1);
   final last = DateTime(month.year, month.month + 1, 0);
+
+  // Demo/dev: fabricate a believable month of intake around target.
+  if (ref.watch(devModeProvider)) {
+    final t = ref.watch(dailyTargetsProvider).kcal;
+    final n = DateTime.now();
+    final isCurrentMonth = month.year == n.year && month.month == n.month;
+    final upto = isCurrentMonth ? n.day : last.day;
+    final out = <int, double>{};
+    for (int day = 1; day <= upto; day++) {
+      if (day % 6 == 0) continue; // a few un-logged days for realism
+      final r = 0.6 + ((day * 37) % 55) / 100.0; // deterministic 0.6..1.15
+      out[day] = r * t;
+    }
+    return out;
+  }
+
   final bucketed = await repo.entriesForRange(first, last);
   final out = <int, double>{};
   bucketed.forEach((d, entries) {

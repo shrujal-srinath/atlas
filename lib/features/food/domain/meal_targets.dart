@@ -1,56 +1,61 @@
 import '../../../shared/models/models.dart';
-import 'meal_entry.dart';
+import 'meal_plan.dart';
+import 'targets.dart';
 
-/// Default share of the daily calorie target each meal slot carries when the
-/// user hasn't set a manual per-meal goal. Main meals split the day; the two
-/// workout slots are optional (no fixed goal — they show `X kcal`, no `of Y`).
-const _defaultMealWeights = <MealTimeSlot, double>{
-  MealTimeSlot.breakfast: 0.25,
-  MealTimeSlot.lunch: 0.30,
-  MealTimeSlot.dinner: 0.30,
-  MealTimeSlot.snack: 0.15,
-  MealTimeSlot.preWorkout: 0, // optional → null target
-  MealTimeSlot.postWorkout: 0, // optional → null target
-};
+/// Per-meal target for a single slot — calories **and** macros, so a meal's
+/// goals tell the same story as the day. `kcal == null` marks a disabled meal
+/// (not part of the schedule).
+class MealMacroTargets {
+  final int? kcal;
+  final int proteinG;
+  final int carbsG;
+  final int fatG;
+  final int fiberG;
+  const MealMacroTargets({
+    required this.kcal,
+    required this.proteinG,
+    required this.carbsG,
+    required this.fatG,
+    required this.fiberG,
+  });
 
-/// Resolve the per-meal calorie goals shown on the diary.
-///
-/// A manual [overrides] value (keyed by slot `dbValue`) wins for that slot;
-/// otherwise the slot falls back to `weight × dailyKcal` rounded to the nearest
-/// 10. Slots with a zero default weight and no override resolve to `null`,
-/// which the UI renders as `X kcal` (no `of Y`).
+  bool get hasGoal => kcal != null;
+  bool get hasMacros => proteinG > 0 || carbsG > 0 || fatG > 0;
+}
+
+/// Per-meal calorie goals from the user's [MealPlan]: enabled meals get their
+/// resolved calories (Fixed or Auto-share), disabled meals resolve to `null`.
 Map<MealTimeSlot, int?> resolveMealTargets({
   required int dailyKcal,
-  Map<String, dynamic>? overrides,
+  required MealPlan plan,
 }) {
-  final out = <MealTimeSlot, int?>{};
-  for (final slot in MealTimeSlot.values) {
-    final override = _readOverride(overrides, slot);
-    if (override != null) {
-      out[slot] = override;
-      continue;
-    }
-    final weight = _defaultMealWeights[slot] ?? 0;
-    out[slot] = weight <= 0 ? null : _roundTo10(weight * dailyKcal);
-  }
-  return out;
+  final kcalBySlot = plan.resolveKcal(dailyKcal);
+  return {for (final s in MealTimeSlot.values) s: kcalBySlot[s]};
 }
 
-/// The auto-split value for a slot, ignoring any manual override — used to
-/// pre-fill the per-meal fields in the goals editor.
-int autoSplitFor(MealTimeSlot slot, int dailyKcal) {
-  final weight = _defaultMealWeights[slot] ?? 0;
-  return weight <= 0 ? 0 : _roundTo10(weight * dailyKcal);
+/// Full per-meal targets — calories + every macro. Macros are distributed
+/// across the enabled meals in proportion to each meal's calorie share, so a
+/// meal's macros track its calories and the per-meal sums equal the day exactly.
+Map<MealTimeSlot, MealMacroTargets> resolveMealMacroTargets({
+  required DailyTargets daily,
+  required MealPlan plan,
+}) {
+  final kcalBySlot = plan.resolveKcal(daily.kcal.round());
+  final weights = <MealTimeSlot, double>{
+    for (final e in kcalBySlot.entries) e.key: e.value.toDouble(),
+  };
+  final p = distributeByWeight(daily.proteinG.round(), weights);
+  final cb = distributeByWeight(daily.carbsG.round(), weights);
+  final ft = distributeByWeight(daily.fatG.round(), weights);
+  final fb = distributeByWeight(daily.micros.fiberG.round(), weights);
+  return {
+    for (final slot in MealTimeSlot.values)
+      slot: MealMacroTargets(
+        kcal: kcalBySlot[slot],
+        proteinG: p[slot] ?? 0,
+        carbsG: cb[slot] ?? 0,
+        fatG: ft[slot] ?? 0,
+        fiberG: fb[slot] ?? 0,
+      ),
+  };
 }
-
-int? _readOverride(Map<String, dynamic>? overrides, MealTimeSlot slot) {
-  if (overrides == null) return null;
-  final raw = overrides[slot.dbValue];
-  if (raw is num) {
-    final v = raw.toInt();
-    return v > 0 ? v : null;
-  }
-  return null;
-}
-
-int _roundTo10(double v) => (v / 10).round() * 10;

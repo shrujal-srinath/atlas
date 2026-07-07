@@ -118,6 +118,8 @@ class _XpBarsCard extends ConsumerWidget {
                     enabled: true,
                     touchTooltipData: BarTouchTooltipData(
                       getTooltipColor: (_) => c.surfaceElevated,
+                      fitInsideHorizontally: true,
+                      fitInsideVertically: true,
                       tooltipPadding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 5),
                       getTooltipItem: (group, _, rod, _) {
@@ -526,7 +528,7 @@ class _ActivityRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     final h = contrib.habit;
-    final color = h.section.color(c);
+    final color = h.sectionId.sectionColor(c);
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
       child: Row(

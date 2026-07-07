@@ -24,12 +24,15 @@ final appUserProvider = FutureProvider<AppUser?>((ref) async {
   if (ref.watch(devModeProvider)) return mockUser;
   final session = ref.watch(sessionProvider);
   if (session == null) return null;
+  // maybeSingle (not single) so a momentarily-missing row — e.g. first run
+  // before the on_auth_user_created trigger commits — degrades to null
+  // instead of throwing.
   final data = await SupabaseService.client
       .from('users')
       .select()
       .eq('id', session.user.id)
-      .single();
-  return AppUser.fromJson(data);
+      .maybeSingle();
+  return data == null ? null : AppUser.fromJson(data);
 });
 
 class AuthNotifier extends StateNotifier<AsyncValue<void>> {
@@ -80,10 +83,25 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
     return SupabaseService.auth.resend(type: OtpType.signup, email: email);
   }
 
-  /// Google OAuth sign-in. Requires the Google provider enabled in Supabase
-  /// and the `redirectTo` deep link allow-listed (+ an Android intent-filter).
-  /// Until configured this throws a gotrue error, surfaced to the user via a
-  /// snackbar.
+  /// Native Google sign-in (google_sign_in v7) → Supabase `signInWithIdToken`.
+  /// Shows the system Google account sheet (no browser bounce), takes the
+  /// returned ID token, and exchanges it for a Supabase session.
+  ///
+  /// Setup required (one-time):
+  ///  - A Google Cloud **Web** OAuth client whose ID is in
+  ///    [SupabaseService.googleWebClientId] (passed as `serverClientId`).
+  ///  - A Google Cloud **Android** OAuth client registered with package
+  ///    `com.shrujalsrinath.atlas` + the build's SHA-1 (no value used in code;
+  ///    Google matches the app by package + signature).
+  ///  - Google provider enabled in Supabase (Web client id + secret).
+  /// Errors (incl. user-cancel) bubble up and are shown via a snackbar.
+  /// Browser-based Google OAuth via Supabase. Opens a Chrome Custom Tab, and
+  /// the session lands back in the app through the `io.atlas.app://login-callback/`
+  /// deep link (intent-filter in AndroidManifest). This deliberately avoids the
+  /// native `google_sign_in` / Credential Manager path, which fails on many
+  /// devices with `[16] Account reauth failed`. Requires, in the Supabase
+  /// dashboard: Google provider enabled + `io.atlas.app://login-callback/` in
+  /// Auth → URL Configuration → Redirect URLs.
   Future<void> signInWithGoogle() async {
     await SupabaseService.auth.signInWithOAuth(
       OAuthProvider.google,

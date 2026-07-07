@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -31,13 +33,34 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   bool _loading = false;
   bool _googleLoading = false;
 
+  // Resend cooldown — prevents spamming the email-code endpoint with no
+  // feedback about why nothing seems to happen.
+  static const _resendCooldown = Duration(seconds: 30);
+  Timer? _cooldownTicker;
+  int _cooldownSecs = 0;
+
   @override
   void dispose() {
     _nameCtrl.dispose();
     _emailCtrl.dispose();
     _passwordCtrl.dispose();
     _codeCtrl.dispose();
+    _cooldownTicker?.cancel();
     super.dispose();
+  }
+
+  void _startCooldown() {
+    _cooldownTicker?.cancel();
+    setState(() => _cooldownSecs = _resendCooldown.inSeconds);
+    _cooldownTicker = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) return;
+      if (_cooldownSecs <= 1) {
+        t.cancel();
+        setState(() => _cooldownSecs = 0);
+      } else {
+        setState(() => _cooldownSecs -= 1);
+      }
+    });
   }
 
   String get _email => _emailCtrl.text.trim();
@@ -70,6 +93,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     }
     HapticFeedback.lightImpact();
     setState(() => _phase = 1);
+    _startCooldown();
     showSnack(context, 'We emailed a 6-digit code to $_email.');
   }
 
@@ -87,7 +111,9 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       if (!mounted) return;
       HapticFeedback.mediumImpact();
       showSnack(context, 'Email verified — welcome to ATLAS.');
-      context.go('/home');
+      // Navigation is handled by the router redirect (signup → splash →
+      // onboarding once the session lands) — hardcoding /home here would flash
+      // the home page before the onboarding gate resolves.
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
     } finally {
@@ -96,9 +122,12 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   }
 
   Future<void> _resend() async {
+    if (_cooldownSecs > 0) return;
     try {
       await ref.read(authNotifierProvider.notifier).resendSignupCode(_email);
-      if (mounted) showSnack(context, 'New code sent to $_email.');
+      if (!mounted) return;
+      _startCooldown();
+      showSnack(context, 'New code sent to $_email.');
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
     }
@@ -207,7 +236,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
         textAlign: TextAlign.center,
         TextSpan(
           text: 'Already have an account?  ',
-          style: AuthType.body.copyWith(color: AuthColors.inkMuted, fontSize: 13.5),
+          style: AuthType.body.copyWith(color: AuthColors.inkSecondary, fontSize: 13.5),
           children: const [
             TextSpan(text: 'Sign in', style: AuthType.link),
           ],
@@ -248,8 +277,17 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
         const SizedBox(height: 6),
         Center(
           child: TextButton(
-            onPressed: _loading ? null : _resend,
-            child: const Text('Resend code', style: AuthType.link),
+            onPressed: (_loading || _cooldownSecs > 0) ? null : _resend,
+            child: Text(
+              _cooldownSecs > 0
+                  ? 'Resend code (${_cooldownSecs}s)'
+                  : 'Resend code',
+              style: AuthType.link.copyWith(
+                color: _cooldownSecs > 0
+                    ? AuthColors.inkSecondary
+                    : AuthColors.accent,
+              ),
+            ),
           ),
         ),
       ],
@@ -262,7 +300,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       behavior: HitTestBehavior.opaque,
       child: Text('Use a different email',
           textAlign: TextAlign.center,
-          style: AuthType.label.copyWith(color: AuthColors.inkMuted)),
+          style: AuthType.label.copyWith(color: AuthColors.inkSecondary)),
     );
   }
 }

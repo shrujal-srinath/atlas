@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/app_snackbar.dart';
 import '../../food/providers/food_providers.dart';
+import '../../onboarding/habit_guide.dart';
 
 /// 4-tile bottom sheet invoked by the center FAB on Home.
 /// Order: Habit · Food · Water · Journal.
@@ -51,8 +53,11 @@ class _QuickAdd4TileState extends ConsumerState<_QuickAdd4Tile>
   Widget build(BuildContext context) {
     final c = context.c;
     final t = context.t;
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+    final guiding = ref.watch(habitGuideProvider) == HabitGuideStep.habitTile;
+    final sheet = Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: Container(
         decoration: BoxDecoration(
           color: c.surface,
@@ -105,7 +110,10 @@ class _QuickAdd4TileState extends ConsumerState<_QuickAdd4Tile>
                             ),
                           ),
                           const SizedBox(height: 4),
-                          Text('Start a moment', style: t.h2.copyWith(fontSize: 20)),
+                          Text(
+                            'Start a moment',
+                            style: t.h2.copyWith(fontSize: 20),
+                          ),
                           const SizedBox(height: 2),
                           Text(
                             'Capture it before it passes.',
@@ -137,11 +145,14 @@ class _QuickAdd4TileState extends ConsumerState<_QuickAdd4Tile>
                           listenable: _intro,
                           index: 1,
                           child: _QuickTile(
+                            key: habitGuideHabitTileKey,
                             icon: LucideIcons.repeat,
                             label: 'Habit',
                             sublabel: 'Build a routine',
                             accent: c.accent,
                             onTap: () {
+                              // End the first-run guide if it was pointing here.
+                              ref.read(habitGuideProvider.notifier).dismiss();
                               // Capture the router before popping the sheet so
                               // the push runs on a live context.
                               final router = GoRouter.of(context);
@@ -185,19 +196,13 @@ class _QuickAdd4TileState extends ConsumerState<_QuickAdd4Tile>
                             instant: true,
                             onTap: () async {
                               HapticFeedback.lightImpact();
-                              final repo = ref.read(foodRepositoryProvider);
-                              final date = ref.read(diaryDateProvider);
-                              await repo.addWater(250, date);
-                              ref.invalidate(waterIntakeProvider);
+                              await addWaterIntake(ref, 250);
                               if (context.mounted) Navigator.of(context).pop();
                             },
                             onLongPress: () async {
                               final ml = await _promptCustomWater(context);
                               if (ml == null || ml <= 0) return;
-                              final repo = ref.read(foodRepositoryProvider);
-                              final date = ref.read(diaryDateProvider);
-                              await repo.addWater(ml, date);
-                              ref.invalidate(waterIntakeProvider);
+                              await addWaterIntake(ref, ml);
                               if (context.mounted) Navigator.of(context).pop();
                             },
                           ),
@@ -230,6 +235,33 @@ class _QuickAdd4TileState extends ConsumerState<_QuickAdd4Tile>
         ),
       ),
     );
+
+    if (!guiding) return sheet;
+    // First-run guide, step 2: spotlight the "Habit" tile. Wait for the intro
+    // stagger to settle so the tile is measured at its resting position.
+    return Stack(
+      children: [
+        sheet,
+        Positioned.fill(
+          child: AnimatedBuilder(
+            animation: _intro,
+            builder: (_, _) => _intro.isCompleted
+                ? CoachmarkLayer(
+                    targetKey: habitGuideHabitTileKey,
+                    cutoutPadding: 6,
+                    cutoutRadius: AppRadii.card,
+                    title: 'Choose “Habit”',
+                    body: 'Build a routine you’ll track every day.',
+                    stepIndex: 1,
+                    stepCount: 2,
+                    onSkip: () =>
+                        ref.read(habitGuideProvider.notifier).dismiss(),
+                  )
+                : const SizedBox.shrink(),
+          ),
+        ),
+      ],
+    );
   }
 
   Future<int?> _promptCustomWater(BuildContext context) async {
@@ -258,8 +290,15 @@ class _QuickAdd4TileState extends ConsumerState<_QuickAdd4Tile>
               child: const Text('Cancel'),
             ),
             FilledButton(
-              onPressed: () =>
-                  Navigator.of(ctx).pop(int.tryParse(ctrl.text.trim())),
+              onPressed: () {
+                final v = int.tryParse(ctrl.text.trim());
+                if (v == null || v <= 0 || v > 5000) {
+                  showSnack(ctx, 'Enter a volume between 1–5000 ml.',
+                      isError: true);
+                  return;
+                }
+                Navigator.of(ctx).pop(v);
+              },
               child: const Text('Add'),
             ),
           ],
@@ -286,8 +325,11 @@ class _StaggerItem extends StatelessWidget {
     final start = (index * 0.09).clamp(0.0, 0.7);
     final anim = CurvedAnimation(
       parent: listenable as Animation<double>,
-      curve: Interval(start, (start + 0.5).clamp(0.0, 1.0),
-          curve: Curves.easeOutCubic),
+      curve: Interval(
+        start,
+        (start + 0.5).clamp(0.0, 1.0),
+        curve: Curves.easeOutCubic,
+      ),
     );
     return AnimatedBuilder(
       animation: anim,
@@ -343,6 +385,7 @@ class _QuickTile extends StatefulWidget {
   final VoidCallback? onLongPress;
 
   const _QuickTile({
+    super.key,
     required this.icon,
     required this.label,
     required this.sublabel,
@@ -408,8 +451,9 @@ class _QuickTileState extends State<_QuickTile> {
                       color: widget.accent.withValues(alpha: 0.13),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                          color: widget.accent.withValues(alpha: 0.25),
-                          width: 0.5),
+                        color: widget.accent.withValues(alpha: 0.25),
+                        width: 0.5,
+                      ),
                     ),
                     child: Icon(widget.icon, size: 19, color: widget.accent),
                   ),

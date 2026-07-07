@@ -3,7 +3,9 @@ import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_theme.dart';
 
-/// Compact date selector for the diary: ‹ Tue · May 27 ›  +  calendar button.
+/// Compact date selector for the diary: ‹ Tue · May 27 ›. Month/date jumping
+/// lives in the Fueling strip's calendar right above this (which also shows
+/// adherence), so this strip intentionally has no separate calendar button.
 class DateStrip extends StatelessWidget {
   final DateTime date;
   final ValueChanged<DateTime> onChanged;
@@ -48,19 +50,6 @@ class DateStrip extends StatelessWidget {
           onTap: _isToday
               ? null
               : () => onChanged(date.add(const Duration(days: 1))),
-        ),
-        const SizedBox(width: 4),
-        _IconBtn(
-          icon: LucideIcons.calendar,
-          onTap: () async {
-            final picked = await showDatePicker(
-              context: context,
-              initialDate: date,
-              firstDate: DateTime(DateTime.now().year - 2),
-              lastDate: DateTime.now(),
-            );
-            if (picked != null) onChanged(DateTime(picked.year, picked.month, picked.day));
-          },
         ),
       ],
     );

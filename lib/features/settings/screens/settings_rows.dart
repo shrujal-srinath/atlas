@@ -66,40 +66,6 @@ class _Row extends StatelessWidget {
   }
 }
 
-class _NumRow extends StatelessWidget {
-  final String label;
-  final String unit;
-  final int? value;
-  final Future<void> Function(int) onSaved;
-  const _NumRow({
-    required this.label,
-    required this.unit,
-    required this.value,
-    required this.onSaved,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return _Row(
-      label: label,
-      value: value == null ? 'Set' : '$value $unit',
-      onTap: () async {
-        final v = await showTextEditSheet(
-          context,
-          title: label,
-          initial: value?.toString() ?? '',
-          suffix: unit,
-          keyboardType: TextInputType.number,
-        );
-        if (v != null && v.isNotEmpty) {
-          final n = int.tryParse(v);
-          if (n != null) await onSaved(n);
-        }
-      },
-    );
-  }
-}
-
 class _SwitchRow extends StatelessWidget {
   final String label;
   final String sub;
@@ -268,7 +234,7 @@ class _ToggleHalf extends StatelessWidget {
                   fontFamily: 'Inter',
                   fontSize: 13,
                   fontWeight: active ? FontWeight.w600 : FontWeight.w500,
-                  color: active ? c.accent : c.textMuted,
+                  color: active ? c.textPrimary : c.textMuted,
                 ),
               ),
             ],

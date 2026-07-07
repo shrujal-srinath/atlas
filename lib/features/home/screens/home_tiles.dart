@@ -53,16 +53,21 @@ class _LevelTile extends ConsumerWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text(
-                  _fmt(into),
-                  style: TextStyle(
-                    fontFamily: 'Inter',
-                    fontSize: 21,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.6,
-                    color: c.textPrimary,
-                    height: 1.0,
-                    fontFeatures: const [FontFeature.tabularFigures()],
+                TweenAnimationBuilder<int>(
+                  tween: IntTween(end: into),
+                  duration: const Duration(milliseconds: 700),
+                  curve: Curves.easeOutCubic,
+                  builder: (_, value, _) =>Text(
+                    _fmt(value),
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 21,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.6,
+                      color: c.textPrimary,
+                      height: 1.0,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
                   ),
                 ),
                 const SizedBox(width: 4),
@@ -84,11 +89,16 @@ class _LevelTile extends ConsumerWidget {
             const Spacer(),
             ClipRRect(
               borderRadius: BorderRadius.circular(99),
-              child: LinearProgressIndicator(
-                value: progress,
-                minHeight: 5,
-                backgroundColor: c.surfaceElevated,
-                valueColor: AlwaysStoppedAnimation(c.accent),
+              child: TweenAnimationBuilder<double>(
+                tween: Tween<double>(end: progress.clamp(0.0, 1.0)),
+                duration: const Duration(milliseconds: 700),
+                curve: Curves.easeOutCubic,
+                builder: (_, value, _) => LinearProgressIndicator(
+                  value: value,
+                  minHeight: 5,
+                  backgroundColor: c.surfaceElevated,
+                  valueColor: AlwaysStoppedAnimation(c.accent),
+                ),
               ),
             ),
             const SizedBox(height: 7),
@@ -141,7 +151,7 @@ class _MultiTileState extends ConsumerState<_MultiTile> {
     HapticFeedback.selectionClick();
     switch (face) {
       case 'c':
-        context.push('/stats/trends');
+        context.push('/stats');
       case 't':
         context.push('/todo');
       default:

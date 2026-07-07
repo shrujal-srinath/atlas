@@ -1,13 +1,19 @@
 part of 'home_screen.dart';
 
-class _ScoreBlock extends StatelessWidget {
+class _ScoreBlock extends ConsumerWidget {
   final _DayVM day;
   final VoidCallback onTap;
   const _ScoreBlock({required this.day, required this.onTap});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final c = context.c;
+    // Real projected score + score-streak (were previously hardcoded).
+    final proj = ref
+        .watch(homeScoreProvider(ref.watch(selectedDateProvider)))
+        .valueOrNull
+        ?.projectedScore;
+    final streak = ref.watch(currentScoreStreakProvider).valueOrNull ?? 0;
     return _Card(
       onTap: onTap,
       padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
@@ -58,16 +64,17 @@ class _ScoreBlock extends StatelessWidget {
                   children: [
                     const _Overline('Standing'),
                     const Spacer(),
-                    Text(
-                      'proj 84%',
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w700,
-                        color: c.accent,
-                        fontFeatures: const [FontFeature.tabularFigures()],
+                    if (proj != null)
+                      Text(
+                        'proj $proj%',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
+                          color: c.accent,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
                       ),
-                    ),
                     const SizedBox(width: 2),
                     Icon(LucideIcons.chevronRight, size: 15, color: c.textMuted),
                   ],
@@ -85,12 +92,14 @@ class _ScoreBlock extends StatelessWidget {
                       text: '${day.done}/${day.total} done',
                       color: c.textMuted,
                     ),
-                    const SizedBox(width: 6),
-                    _MicroPill(
-                      icon: LucideIcons.flame,
-                      text: '3d',
-                      color: c.amber,
-                    ),
+                    if (streak > 0) ...[
+                      const SizedBox(width: 6),
+                      _MicroPill(
+                        icon: LucideIcons.flame,
+                        text: '${streak}d',
+                        color: c.amber,
+                      ),
+                    ],
                   ],
                 ),
               ],

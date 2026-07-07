@@ -4,7 +4,7 @@ import 'package:atlas/shared/models/models.dart';
 
 Habit _hab({
   String id = 'h',
-  HabitSection section = HabitSection.athletic,
+  String sectionId = 'athletic',
   HabitType type = HabitType.positive,
   HabitPriority priority = HabitPriority.normal,
   GoalType? goalType,
@@ -15,7 +15,7 @@ Habit _hab({
       userId: 'u',
       name: id,
       icon: 'dumbbell',
-      section: section,
+      sectionId: sectionId,
       type: type,
       daysOfWeek: const [1, 2, 3, 4, 5, 6, 7],
       goalValue: goalValue,
@@ -79,6 +79,13 @@ void main() {
       final h = _hab(type: HabitType.todo);
       expect(taskRatio(h, _log(completed: true)), 1.0);
       expect(taskRatio(h, _log(completed: false)), 0.0);
+    });
+
+    test('negative habit is clean by default; a slip penalises', () {
+      final h = _hab(type: HabitType.negative);
+      expect(taskRatio(h, null), 1.0); // no log → clean
+      expect(taskRatio(h, _log(completed: true)), 1.0); // stayed clean
+      expect(taskRatio(h, _log(completed: false)), kNegativeSlipRatio); // slip
     });
   });
 
@@ -145,7 +152,7 @@ void main() {
       final tasks = [
         for (final s in HabitSection.values)
           ScoredTaskInput(
-            _hab(id: s.name, section: s, goalType: GoalType.reps, goalValue: 1),
+            _hab(id: s.name, sectionId: s.id, goalType: GoalType.reps, goalValue: 1),
             _log(habitId: s.name, actualValue: 5),
           ),
       ];
@@ -170,10 +177,10 @@ void main() {
       final tasks = [
         ScoredTaskInput(_hab(id: 'a1'), _log(habitId: 'a1', completed: true)),
         ScoredTaskInput(
-            _hab(id: 'a2', section: HabitSection.mind),
+            _hab(id: 'a2', sectionId: 'mind'),
             _log(habitId: 'a2', completed: true)),
         ScoredTaskInput(
-            _hab(id: 'a3', section: HabitSection.body),
+            _hab(id: 'a3', sectionId: 'body'),
             _log(habitId: 'a3', completed: false)),
       ];
       final b = computeScore(

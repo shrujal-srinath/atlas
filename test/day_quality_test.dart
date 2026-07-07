@@ -12,7 +12,7 @@ Habit _hab(String id, HabitType type) => Habit(
       userId: 'u',
       name: id,
       icon: 'dumbbell',
-      section: HabitSection.athletic,
+      sectionId: 'athletic',
       type: type,
       daysOfWeek: const [1, 2, 3, 4, 5, 6, 7],
       effortRatingEnabled: false,
@@ -40,12 +40,21 @@ void main() {
       expect(q.isRestDay, isFalse);
     });
 
-    test('a negative slip breaks the good day even at 100% positives', () {
+    test('a logged negative slip breaks the good day even at 100% positives', () {
       final habits = [_hab('a', HabitType.positive), _hab('n', HabitType.negative)];
-      final logs = [_log('a', _day, true)]; // negative 'n' not maintained
+      // Negative 'n' is logged as a slip (completed:false = broke it).
+      final logs = [_log('a', _day, true), _log('n', _day, false)];
       final q = computeDayQuality(habits, logs, _day);
       expect(q.negSlips, 1);
       expect(q.isGoodDay, isFalse);
+    });
+
+    test('un-logged negative is clean by default → good day', () {
+      final habits = [_hab('a', HabitType.positive), _hab('n', HabitType.negative)];
+      final logs = [_log('a', _day, true)]; // 'n' has no log → clean, not a slip
+      final q = computeDayQuality(habits, logs, _day);
+      expect(q.negSlips, 0);
+      expect(q.isGoodDay, isTrue);
     });
 
     test('maintained negative + done positive → good day', () {
@@ -73,7 +82,7 @@ void main() {
         userId: h.userId,
         name: h.name,
         icon: h.icon,
-        section: h.section,
+        sectionId: h.sectionId,
         type: h.type,
         daysOfWeek: const [], // never scheduled
         effortRatingEnabled: false,

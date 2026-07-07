@@ -221,9 +221,7 @@ class _SelectSheet extends StatelessWidget {
                       child: Text(
                         entry.value,
                         style: t.bodyStrong.copyWith(
-                          color: entry.key == initial
-                              ? c.accent
-                              : c.textPrimary,
+                          color: c.textPrimary,
                         ),
                       ),
                     ),

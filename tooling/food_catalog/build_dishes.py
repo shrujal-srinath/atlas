@@ -92,14 +92,34 @@ R = [
  ("samosa","Samosa",["singara","samosas","veg samosa"],"Snacks",piece(68),68,0.6,[(MAIDA,25),(POTATO,40),(OIL,11),(PEAS,8)],84),
  ("pav-bhaji","Pav Bhaji (bhaji)",["bhaji","pao bhaji"],"Snacks",pc(KAT,0),180,1.2,[(POTATO,50),(CAULI,25),(PEAS,15),(BUTTER,12),(ONION,25),(TOMATO,30)],80),
  ("dhokla","Dhokla",["khaman","besan dhokla"],"Snacks",piece(40),110,0.8,[(BESAN,40),(YOGURT,15),(OIL,5)],68),
- ("curd","Curd / Dahi",["dahi","yogurt","plain curd","thayir","mosaru"],"Dairy",pc([("Katori",100),("Bowl",150),("Cup",200)],0),100,0.0,[(YOGURT,100)],90),
- ("raita","Raita (plain)",["boondi raita","veg raita","cucumber raita"],"Dairy",pc([("Katori",100),("Bowl",150)],0),110,0.6,[(YOGURT,85),(ONION,10),(BESAN,4)],72),
+ ("curd","Curd / Dahi",["dahi","yogurt","plain curd","thayir","mosaru"],"Dairy",pc([("Cup",240),("Katori",150),("Bowl",200)],0),100,0.0,[(YOGURT,100)],90),
+ ("raita","Raita (plain)",["boondi raita","veg raita","cucumber raita"],"Dairy",pc([("Cup",200),("Katori",100),("Bowl",150)],0),110,0.6,[(YOGURT,85),(ONION,10),(BESAN,4)],72),
  ("lassi","Sweet Lassi",["lassi","sweet lassi","punjabi lassi"],"Beverages",pc([("Glass",200),("Cup",150)],0),150,0.0,[(YOGURT,80),(MILK,20),(SUGAR,15)],78),
  ("buttermilk","Buttermilk / Chaas",["chaas","chhaas","mattha","majjige"],"Beverages",pc([("Glass",200),("Cup",150)],0),200,0.5,[(YOGURT,50)],72),
  ("masala-chai","Masala Chai",["chai","tea","milk tea","cutting chai"],"Beverages",pc([("Cup",150),("Glass",200)],0),150,0.0,[(MILK,80),(SUGAR,8)],90),
  ("gulab-jamun","Gulab Jamun",["gulab jamun","jamun"],"Sweets",piece(50),50,0.0,[(MAIDA,15),(MILK,20),(SUGAR,20),(GHEE,4)],78),
  ("kheer","Kheer",["payasam","rice pudding","payasa"],"Sweets",pc([("Katori",150),("Bowl",200)],0),130,0.0,[(MILK,120),(RICE,12),(SUGAR,15),(CASHEW,4)],76),
  ("suji-halwa","Suji Halwa",["sooji halwa","rava sheera","sheera"],"Sweets",pc([("Katori",100),("Bowl",150)],0),90,0.0,[(SEMOLINA,30),(GHEE,12),(SUGAR,20),(MILK,30)],72),
+ # ── added: user's daily foods ──
+ ("butter-dosa","Butter Dosa",["butter dosai","ghee dosa","benne dosa"],"South Indian",piece(80),80,0.6,[(RICE,35),(URAD,12),(OIL,3),(BUTTER,8)],84),
+ ("channa","Channa (boiled)",["channa","chana sundal","boiled chana","kadalai","sundal","chickpea snack"],"Snacks",pc(KAT,0),110,0.8,[(CHOLE,45),(COCONUT,8),(OIL,3)],82),
+ ("coconut-chutney","Coconut Chutney",["chutney","coconut chutney","thengai chutney","nariyal chutney"],"Sides",pc([("Tbsp",20),("Katori",50)],0),75,0.5,[(COCONUT,45),(CHANA_DAL,6),(OIL,2)],80),
+ ("idli-sambar","Idli Sambar",["idli sambhar","idly sambar","idli sambar","2 idli sambar"],"South Indian",pc([("Plate",290),("Bowl",240)],0),290,1.4,[(RICE,45),(URAD,18),(TOOR,18),(OIL,3),(TOMATO,12),(ONION,10),(TAMARIND,2),(CARROT,8)],84),
+ ("shavige","Shavige (rice vermicelli)",["shavige","semiya","sevai","vermicelli","idiyappam","rice noodles","shavige bath"],"South Indian",pc(KAT,0),125,0.8,[(RICE,40),(OIL,5),(ONION,8),(COCONUT,5)],78),
+ ("kesari-bath","Kesari Bath",["kesari bath","rava kesari","kesari","kesaribath"],"Sweets",pc([("Katori",100),("Bowl",150)],0),100,0.0,[(SEMOLINA,30),(GHEE,12),(SUGAR,22),(MILK,25)],80),
+]
+
+# Direct branded / manufactured items (not composed from ingredients) — values
+# from the product label, per 100 g.
+DIRECT = [
+  {"id": "brand:yogabar-protein-oats", "source": "curated", "name": "Protein Oats",
+   "brand": "Yogabar", "kcal": 400, "protein_g": 24, "carbs_g": 50, "fat_g": 11,
+   "fiber_g": 10, "sugar_g": 8, "sat_fat_g": 2.6, "sodium_mg": 110, "calcium_mg": 120,
+   "iron_mg": 4.5, "potassium_mg": 300,
+   "aliases": ["yogabar oats", "yoga bar oats", "protein oats", "yogabar protein oats",
+               "high protein oats"],
+   "measures": [{"label": "g", "g": 1}, {"label": "Serving", "g": 40}, {"label": "Bowl", "g": 50}],
+   "food_group": "Breakfast cereals", "region": "IN", "popularity": 72},
 ]
 
 def main():
@@ -133,6 +153,23 @@ def main():
         out.append(row)
         table.append((name, kcal, per["protein_g"], per["carbs_g"],
                       per["fat_g"], per["calcium_mg"], per["iron_mg"]))
+
+    # direct branded items (label values, per 100 g)
+    for d in DIRECT:
+        row = {"id": d["id"], "source": d.get("source", "curated"), "name": d["name"],
+               "brand": d.get("brand"), "serving_qty": 100, "serving_unit": "g",
+               "kcal": d.get("kcal", 0), **{c: d.get(c, 0) for c in NUM_COLS},
+               "aliases": d.get("aliases", []),
+               "measures": d.get("measures", [{"label": "g", "g": 1}]),
+               "food_group": d.get("food_group"), "region": d.get("region", "IN"),
+               "popularity": d.get("popularity", 50)}
+        row["search_text"] = re.sub(r"\s+", " ",
+            f"{d['name']} {d.get('brand','')} {' '.join(d.get('aliases', []))} "
+            f"{d.get('food_group','')}").strip().lower()
+        out.append(row)
+        table.append((f"{d.get('brand','')} {d['name']}", d.get("kcal", 0),
+                      d.get("protein_g", 0), d.get("carbs_g", 0), d.get("fat_g", 0),
+                      d.get("calcium_mg", 0), d.get("iron_mg", 0)))
 
     json.dump(out, open(OUT, "w", encoding="utf-8"), ensure_ascii=False,
               separators=(",", ":"))

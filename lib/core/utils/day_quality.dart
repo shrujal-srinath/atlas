@@ -4,10 +4,10 @@ import '../../shared/models/models.dart';
 /// calendar's "good day" streak.
 ///
 /// A **good day** = no negative-habit slips AND ≥85% of scheduled positive/todo
-/// habits done. A negative slip is a scheduled break-habit with no completed log
-/// that day (mirrors `taskRatio`, where a negative succeeds only when
-/// `completed == true`). Days with nothing scheduled are rest days — neutral,
-/// they neither extend nor break a streak.
+/// habits done. Negatives are **clean by default** — a slip is only a logged
+/// "broke" mark (`completed == false`) that day (mirrors `taskRatio`). Days with
+/// nothing scheduled are rest days — neutral, they neither extend nor break a
+/// streak.
 class DayQuality {
   final int posScheduled;
   final int posDone;
@@ -57,17 +57,27 @@ DayQuality computeDayQuality(
     for (final l in logs)
       if (l.date == key) l.habitId: l.completed,
   };
+  // Deliberate rest days are neutral — excluded from the day's scheduled set so
+  // they neither extend nor break the good-day streak (mirrors the score).
+  final restedHabits = <String>{
+    for (final l in logs)
+      if (l.date == key && l.restDay) l.habitId,
+  };
 
   int posScheduled = 0, posDone = 0, negScheduled = 0, negSlips = 0;
   for (final h in habits) {
-    if (h.isArchived || !h.daysOfWeek.contains(dow)) continue;
-    final done = doneByHabit[h.id] ?? false;
+    // Skip days before the habit existed — it can't have been "missed" then.
+    if (h.isArchived || !h.existedOn(day) || !h.daysOfWeek.contains(dow)) {
+      continue;
+    }
+    if (restedHabits.contains(h.id)) continue;
     if (h.type == HabitType.negative) {
       negScheduled++;
-      if (!done) negSlips++;
+      // Clean by default — only an explicit "broke" log (completed:false) slips.
+      if (doneByHabit[h.id] == false) negSlips++;
     } else {
       posScheduled++;
-      if (done) posDone++;
+      if (doneByHabit[h.id] == true) posDone++;
     }
   }
   return DayQuality(

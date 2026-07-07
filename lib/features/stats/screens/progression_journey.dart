@@ -114,6 +114,7 @@ class _JourneyCard extends ConsumerWidget {
                   maxX: (points.length - 1).toDouble(),
                   minY: 0,
                   maxY: maxY <= 0 ? 100 : maxY,
+                  clipData: const FlClipData.all(),
                   lineTouchData: const LineTouchData(enabled: false),
                   gridData: const FlGridData(show: false),
                   titlesData: FlTitlesData(
@@ -168,6 +169,7 @@ class _JourneyCard extends ConsumerWidget {
                       spots: spots,
                       isCurved: true,
                       curveSmoothness: 0.18,
+                      preventCurveOverShooting: true,
                       color: c.accent,
                       barWidth: 2,
                       dotData: FlDotData(

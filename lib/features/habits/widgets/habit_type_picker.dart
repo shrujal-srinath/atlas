@@ -59,7 +59,11 @@ class _HabitTypePickerScreenState extends State<HabitTypePickerScreen> {
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(
-                    AppSpace.screenH, 4, AppSpace.screenH, 8),
+                  AppSpace.screenH,
+                  4,
+                  AppSpace.screenH,
+                  8,
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -73,7 +77,8 @@ class _HabitTypePickerScreenState extends State<HabitTypePickerScreen> {
                     _TypeRow(
                       icon: LucideIcons.repeat,
                       label: 'Regular',
-                      desc: 'Something you do consistently — '
+                      desc:
+                          'Something you do consistently — '
                           'daily, weekly, or on set days.',
                       accent: c.accent,
                       selected: _selected == HabitType.positive,
@@ -83,7 +88,8 @@ class _HabitTypePickerScreenState extends State<HabitTypePickerScreen> {
                     _TypeRow(
                       icon: LucideIcons.ban,
                       label: 'Break',
-                      desc: 'A behaviour you\'re quitting. '
+                      desc:
+                          'A behaviour you\'re quitting. '
                           'Streaks count consecutive clean days.',
                       accent: c.negative,
                       selected: _selected == HabitType.negative,
@@ -93,7 +99,8 @@ class _HabitTypePickerScreenState extends State<HabitTypePickerScreen> {
                     _TypeRow(
                       icon: LucideIcons.checkSquare,
                       label: 'Todo',
-                      desc: 'A one-time task to finish by a date. '
+                      desc:
+                          'A one-time task to finish by a date. '
                           'Counts toward your day, no streak.',
                       accent: c.indigo,
                       selected: _selected == HabitType.todo,
@@ -109,7 +116,11 @@ class _HabitTypePickerScreenState extends State<HabitTypePickerScreen> {
             // scroll, and the CTA takes on the chosen type's colour.
             Padding(
               padding: const EdgeInsets.fromLTRB(
-                  AppSpace.screenH, 8, AppSpace.screenH, 10),
+                AppSpace.screenH,
+                8,
+                AppSpace.screenH,
+                10,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -137,8 +148,11 @@ class _HabitTypePickerScreenState extends State<HabitTypePickerScreen> {
                   const SizedBox(height: 4),
                   TextButton.icon(
                     onPressed: () => context.push('/habits'),
-                    icon: Icon(LucideIcons.layoutList,
-                        size: 15, color: c.textMuted),
+                    icon: Icon(
+                      LucideIcons.layoutList,
+                      size: 15,
+                      color: c.textMuted,
+                    ),
                     label: Text(
                       'View all habits',
                       style: TextStyle(
@@ -205,7 +219,9 @@ class _TypeRowState extends State<_TypeRow> {
           curve: Curves.easeOut,
           padding: const EdgeInsets.all(15),
           decoration: BoxDecoration(
-            color: sel ? widget.accent.withValues(alpha: 0.07) : c.surface,
+            // Selection reads through the accent border + icon + tick + lift —
+            // never an accent wash behind the text (house rule #1).
+            color: c.surface,
             borderRadius: BorderRadius.circular(AppRadii.card),
             border: Border.all(
               color: sel ? widget.accent : c.border,
@@ -213,12 +229,10 @@ class _TypeRowState extends State<_TypeRow> {
             ),
             boxShadow: [
               BoxShadow(
-                color: sel
-                    ? widget.accent.withValues(alpha: 0.12)
-                    : Colors.black.withValues(alpha: 0.04),
-                blurRadius: sel ? 16 : 7,
+                color: Colors.black.withValues(alpha: sel ? 0.10 : 0.04),
+                blurRadius: sel ? 18 : 7,
                 spreadRadius: sel ? -2 : 0,
-                offset: Offset(0, sel ? 5 : 2),
+                offset: Offset(0, sel ? 6 : 2),
               ),
             ],
           ),
@@ -228,19 +242,20 @@ class _TypeRowState extends State<_TypeRow> {
                 width: 46,
                 height: 46,
                 decoration: BoxDecoration(
-                  color: widget.accent
-                      .withValues(alpha: sel ? 0.16 : 0.11),
+                  color: widget.accent.withValues(alpha: sel ? 0.16 : 0.11),
                   borderRadius: BorderRadius.circular(13),
                   border: Border.all(
                     color: widget.accent.withValues(alpha: sel ? 0.4 : 0.2),
                     width: 0.5,
                   ),
                 ),
-                child: Icon(widget.icon,
-                    size: 21,
-                    color: sel
-                        ? widget.accent
-                        : widget.accent.withValues(alpha: 0.85)),
+                child: Icon(
+                  widget.icon,
+                  size: 21,
+                  color: sel
+                      ? widget.accent
+                      : widget.accent.withValues(alpha: 0.85),
+                ),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -320,8 +335,10 @@ class _ExamplesStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     final examples = switch (type) {
-      HabitType.positive => 'morning run · read 20 min · stretch after training',
-      HabitType.negative => 'no phone after 10pm · no junk food · no doomscroll',
+      HabitType.positive =>
+        'morning run · read 20 min · stretch after training',
+      HabitType.negative =>
+        'no phone after 10pm · no junk food · no doomscroll',
       HabitType.todo => 'book physio · order whey · send invoice',
     };
     return AnimatedSwitcher(

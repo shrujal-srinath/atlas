@@ -1,129 +1,80 @@
 part of 'home_screen.dart';
 
-class _Header extends ConsumerWidget {
+/// The home's top row: the live status ticker ("on pace…") takes the width, with
+/// the notification bell pinned to its right. Replaces the old greeting/date
+/// header to reclaim the vertical space it spent.
+class _TopBar extends StatelessWidget {
   final VoidCallback onBell;
-  final bool showGreeting;
-  const _Header({required this.onBell, this.showGreeting = true});
+  const _TopBar({required this.onBell});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        const Expanded(child: _NotifBanner()),
+        const SizedBox(width: 8),
+        _BellButton(onTap: onBell),
+      ],
+    );
+  }
+}
+
+/// Notification bell with an unread dot — sized to sit flush beside the ticker.
+class _BellButton extends ConsumerWidget {
+  final VoidCallback onTap;
+  const _BellButton({required this.onTap});
+
+  static const double _size = 46;
+  static const double _radius = 14;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final c = context.c;
     final unread = ref.watch(bellBadgeCountProvider);
-    // Bell shrinks when the greeting collapses, so the whole row contracts and
-    // we actually reclaim vertical pixels (otherwise the bell pins the row).
-    final bellSize = showGreeting ? 42.0 : 30.0;
-    final bellRadius = showGreeting ? 13.0 : 9.0;
-    final bellIconSize = showGreeting ? 19.0 : 15.0;
-    final now = DateTime.now();
-    final dateLabel =
-        DateFormat('EEEE · d MMM').format(now).toUpperCase();
-    final greeting = _greetingFor(now);
-    final fullName = ref.watch(appUserProvider).valueOrNull?.name.trim() ?? '';
-    final firstName =
-        fullName.isEmpty ? '' : fullName.split(RegExp(r'\s+')).first;
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return Container(
+      width: _size,
+      height: _size,
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: BorderRadius.circular(_radius),
+        border: Border.all(color: c.border, width: 0.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 7,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(_radius),
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(_radius),
+          child: Stack(
+            alignment: Alignment.center,
             children: [
-              Text(
-                dateLabel,
-                style: TextStyle(
-                  fontFamily: 'Inter',
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 1.4,
-                  color: c.textMuted,
-                ),
-              ),
-              ClipRect(
-                child: AnimatedSize(
-                  duration: const Duration(milliseconds: 320),
-                  curve: Curves.easeInOutCubic,
-                  alignment: Alignment.topLeft,
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 240),
-                    switchInCurve: Curves.easeOut,
-                    switchOutCurve: Curves.easeIn,
-                    child: showGreeting
-                        ? Padding(
-                            key: const ValueKey('greeting-on'),
-                            padding: const EdgeInsets.only(top: 3),
-                            child: Text(
-                              firstName.isEmpty
-                                  ? greeting
-                                  : '$greeting, $firstName',
-                              style: TextStyle(
-                                fontFamily: 'Inter',
-                                fontSize: 22,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: -0.6,
-                                color: c.textPrimary,
-                                height: 1.0,
-                              ),
-                            ),
-                          )
-                        : const SizedBox(
-                            key: ValueKey('greeting-off'),
-                            width: double.infinity,
-                            height: 0,
-                          ),
+              Icon(LucideIcons.bell, size: 19, color: c.textSecondary),
+              if (unread > 0)
+                Positioned(
+                  top: 12,
+                  right: 13,
+                  child: Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: c.accent,
+                      border: Border.all(color: c.surface, width: 1.5),
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
         ),
-        AnimatedContainer(
-          duration: const Duration(milliseconds: 320),
-          curve: Curves.easeInOutCubic,
-          width: bellSize,
-          height: bellSize,
-          decoration: BoxDecoration(
-            color: c.surface,
-            borderRadius: BorderRadius.circular(bellRadius),
-            border: Border.all(color: c.border, width: 0.5),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
-                blurRadius: 7,
-                offset: const Offset(0, 1),
-              ),
-            ],
-          ),
-          child: Material(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(bellRadius),
-            child: InkWell(
-              onTap: onBell,
-              borderRadius: BorderRadius.circular(bellRadius),
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Icon(LucideIcons.bell,
-                      size: bellIconSize, color: c.textSecondary),
-                  if (unread > 0)
-                    Positioned(
-                      top: showGreeting ? 9 : 6,
-                      right: showGreeting ? 10 : 7,
-                      child: Container(
-                        width: 6,
-                        height: 6,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: c.accent,
-                          border: Border.all(color: c.surface, width: 1.5),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 }

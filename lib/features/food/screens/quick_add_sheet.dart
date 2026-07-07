@@ -35,7 +35,12 @@ class _QuickAddSheetState extends ConsumerState<QuickAddSheet> {
     super.dispose();
   }
 
-  double _val(TextEditingController c) => double.tryParse(c.text) ?? 0;
+  // Floored at zero so a stray "-" typed into Protein/Carbs/Fat can't save a
+  // negative macro (only kcal was gated before; the other three weren't).
+  double _val(TextEditingController c) {
+    final v = double.tryParse(c.text) ?? 0.0;
+    return v < 0 ? 0.0 : v;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -223,7 +228,7 @@ class _Chip extends StatelessWidget {
             fontFamily: 'Inter',
             fontSize: 13,
             fontWeight: FontWeight.w600,
-            color: active ? c.accent : c.textSecondary,
+            color: active ? c.textPrimary : c.textSecondary,
           ),
         ),
       ),

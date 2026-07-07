@@ -257,6 +257,10 @@ class _FoodDetailScreenState extends ConsumerState<FoodDetailScreen> {
         qty: _totalGrams,
         slot: _slot,
         date: widget.date,
+        // Store the human portion the user picked (e.g. 1 "Cup") so the diary
+        // shows it instead of raw grams.
+        displayQty: _quantity,
+        displayUnit: _measure.label,
       );
       if (!mounted) return;
       HapticFeedback.mediumImpact();
@@ -282,18 +286,15 @@ class _FoodDetailScreenState extends ConsumerState<FoodDetailScreen> {
   }
 
   Future<void> _toggleFav() async {
-    if (widget.food.source == 'off' && widget.food.id.startsWith('off:')) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Log this food first, then favorite it')),
-      );
-      return;
-    }
     setState(() => _favorited = !_favorited);
+    HapticFeedback.selectionClick();
     try {
-      final repo = ref.read(foodRepositoryProvider);
-      await repo.toggleFavorite(widget.food.id, _favorited);
-    } catch (_) {
-      setState(() => _favorited = !_favorited);
+      await ref.read(foodRepositoryProvider).setFavorite(widget.food, _favorited);
+      ref.invalidate(favoriteFoodsProvider);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _favorited = !_favorited); // revert on failure
+      showErrorSnack(context, e);
     }
   }
 }

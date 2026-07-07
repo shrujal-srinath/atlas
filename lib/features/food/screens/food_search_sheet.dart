@@ -821,11 +821,19 @@ class _RichFoodTile extends ConsumerWidget {
   Future<void> _quickAdd(BuildContext context, WidgetRef ref) async {
     HapticFeedback.selectionClick();
     final repo = ref.read(foodRepositoryProvider);
+    // Quick-add logs ONE natural serving (the food's first household measure,
+    // e.g. 1 katori / 1 piece) — matching the detail screen's default — rather
+    // than a flat 100 g. Falls back to grams when a food has no household unit.
+    final m = food.measures.firstWhere((x) => x.grams > 1,
+        orElse: () => const FoodMeasure('', 0));
+    final hasUnit = m.grams > 0;
     final entry = await repo.logFood(
       food: food,
-      qty: food.servingQty,
+      qty: hasUnit ? m.grams : food.servingQty,
       slot: slot,
       date: date,
+      displayQty: hasUnit ? 1.0 : food.servingQty,
+      displayUnit: hasUnit ? m.label : food.servingUnit,
     );
     if (context.mounted) Navigator.of(context).pop(entry);
   }

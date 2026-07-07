@@ -364,19 +364,21 @@ class AppTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: p.surfaceElevated,
+        // White fill + a defined border so inputs always read as inputs — on
+        // the linen background the white pops; on white cards the border holds.
+        fillColor: p.surface,
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadii.button),
-          borderSide: BorderSide(color: p.border),
+          borderSide: BorderSide(color: p.borderStrong),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadii.button),
-          borderSide: BorderSide(color: p.border),
+          borderSide: BorderSide(color: p.borderStrong),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(AppRadii.button),
-          borderSide: BorderSide(color: p.accent, width: 1),
+          borderSide: BorderSide(color: p.accent, width: 1.5),
         ),
         hintStyle: TextStyle(
           color: p.textDim,

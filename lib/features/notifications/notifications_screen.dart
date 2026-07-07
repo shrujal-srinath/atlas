@@ -355,6 +355,8 @@ class _NotifTile extends StatelessWidget {
         'level_up' => LucideIcons.zap,
         'rank_up' => LucideIcons.award,
         'streak_milestone' => LucideIcons.flame,
+        'milestone_halfway' => LucideIcons.target,
+        'milestone_late' => LucideIcons.alertTriangle,
         'reminder' => LucideIcons.bell,
         _ => LucideIcons.info,
       };
@@ -366,6 +368,8 @@ class _NotifTile extends StatelessWidget {
       'level_up' => c.amber,
       'rank_up' => c.athletic,
       'streak_milestone' => c.amber,
+      'milestone_halfway' => c.accent,
+      'milestone_late' => c.negative,
       'reminder' => c.mind,
       _ => c.textSecondary,
     };

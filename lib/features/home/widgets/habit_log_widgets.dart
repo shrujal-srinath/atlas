@@ -1,13 +1,5 @@
 part of 'habit_log_modal.dart';
 
-String _unitLabelFor(GoalType t) => switch (t) {
-      GoalType.reps => 'reps',
-      GoalType.durationMin => 'min',
-      GoalType.distanceKm => 'km',
-      GoalType.litres => 'L',
-      GoalType.custom => '',
-    };
-
 // ── Compact widgets ─────────────────────────────────────────────────
 
 class _CompactStepper extends StatelessWidget {

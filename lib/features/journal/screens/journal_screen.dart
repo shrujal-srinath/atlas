@@ -96,7 +96,10 @@ class _JournalScreenState extends ConsumerState<JournalScreen> {
   Future<void> _flush() async {
     final entry = _current;
     if (entry == null) return;
-    final sleep = double.tryParse(_sleep.text.trim());
+    // Clamped (not rejected) since this is a silent debounced auto-save with
+    // no natural place to surface a blocking error — a day only has 24 hours.
+    final sleepRaw = double.tryParse(_sleep.text.trim());
+    final double? sleep = sleepRaw?.clamp(0.0, 24.0).toDouble();
     final goals =
         _goals.map((g) => g.text.trim()).where((s) => s.isNotEmpty).toList();
     // Build the full entry directly (not copyWith) so clearing a text field

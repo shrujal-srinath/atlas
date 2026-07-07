@@ -9,9 +9,11 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/app_snackbar.dart';
 import '../../../shared/widgets/atlas_controls.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../shared/models/models.dart';
+import '../scoring/section_def.dart';
 import '../../habits/providers/habit_provider.dart';
 import '../../habits/widgets/urge_surf_modal.dart';
 
@@ -31,9 +33,13 @@ Future<void> showHabitQuickSheet(
   Habit habit,
   HabitLog? log,
   String dateStr,
-) =>
-    showHabitLogModal(context, habit, log, dateStr,
-        mode: HabitSheetMode.compact);
+) => showHabitLogModal(
+  context,
+  habit,
+  log,
+  dateStr,
+  mode: HabitSheetMode.compact,
+);
 
 /// Legacy entry — full editor. Kept for the stats / score screens where the
 /// user has already drilled in and expects the full surface.
@@ -86,6 +92,7 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
   // Compact meta: inline reveals.
   bool _effortExpanded = false;
   bool _noteExpanded = false;
+
   /// Local filesystem path of the proof photo for this completion. Set by
   /// `_captureProof` and persisted under app docs at a deterministic path so
   /// it can be re-located later from habit detail.
@@ -108,9 +115,7 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
     _effortRating = log?.effortRating ?? 0;
     _noteCtrl = TextEditingController(text: log?.note ?? '');
     final av = log?.actualValue;
-    _valueCtrl = TextEditingController(
-      text: av == null ? '' : _trimZero(av),
-    );
+    _valueCtrl = TextEditingController(text: av == null ? '' : _trimZero(av));
     _selectedTrigger = log?.triggerTag;
 
     if (_isBreaking && log != null) {
@@ -144,11 +149,21 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
     return r;
   }
 
+  // Floor at zero, and cap overshoot at 10x goal — generous enough for a
+  // genuine over-achiever, but stops a mistyped/pasted value (e.g. an extra
+  // digit) from reading (and later saving) something absurd. Clamped here so
+  // both the stepper buttons and direct typing into the field are covered.
+  double get _valueCeiling {
+    final goal = widget.habit.goalValue ?? 0;
+    return goal > 0 ? goal * 10 : 100000.0;
+  }
+
   double get _currentValue =>
-      double.tryParse(_valueCtrl.text.trim()) ?? 0.0;
+      (double.tryParse(_valueCtrl.text.trim()) ?? 0.0)
+          .clamp(0.0, _valueCeiling);
 
   void _setValue(double v) {
-    if (v < 0) v = 0;
+    v = v.clamp(0.0, _valueCeiling);
     _valueCtrl.text = _trimZero(v);
     final goal = widget.habit.goalValue ?? 0;
     if (goal > 0 && v >= goal && !_isDone) {
@@ -168,10 +183,13 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
           setState(() => _saving = false);
           return;
         }
-        await ref.read(habitActionsProvider.notifier).toggleHabit(
+        await ref
+            .read(habitActionsProvider.notifier)
+            .toggleHabit(
               widget.habit.id,
               widget.dateStr,
-              completed: _breakingOutcome == _BreakingOutcome.surfedIt ||
+              completed:
+                  _breakingOutcome == _BreakingOutcome.surfedIt ||
                   _breakingOutcome == _BreakingOutcome.urgeOnly,
               note: _noteCtrl.text,
               triggerTag: _breakingOutcome == _BreakingOutcome.brokeIt
@@ -180,7 +198,9 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
               urgeOnly: _breakingOutcome == _BreakingOutcome.urgeOnly,
             );
       } else {
-        await ref.read(habitActionsProvider.notifier).toggleHabit(
+        await ref
+            .read(habitActionsProvider.notifier)
+            .toggleHabit(
               widget.habit.id,
               widget.dateStr,
               completed: _isDone,
@@ -200,9 +220,10 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
     setState(() => _mode = HabitSheetMode.expanded);
   }
 
-  void _viewDetails() {
+  void _editHabit() {
     Navigator.of(context).pop();
-    context.push('/habit/${widget.habit.id}');
+    // Direct edit — open the habit editor with the existing habit.
+    context.push('/habit-creation', extra: widget.habit);
   }
 
   /// Captures a photo via the camera, copies it into a deterministic spot
@@ -227,7 +248,12 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
       await File(shot.path).copy(dest.path);
       if (mounted) setState(() => _proofPath = dest.path);
       return true;
-    } catch (_) {
+    } catch (e) {
+      // A null `shot` above (user backed out of the camera) is a normal
+      // cancel and stays silent. Only a real failure — permission denied,
+      // disk error — reaches here, so only this path shows a message;
+      // otherwise "you said no" and "something broke" looked identical.
+      if (mounted) showErrorSnack(context, e);
       return false;
     }
   }
@@ -236,10 +262,12 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
   Widget build(BuildContext context) {
     final c = context.c;
     final t = context.t;
-    final secColor = widget.habit.section.color(c);
+    final secColor = widget.habit.sectionId.sectionColor(c);
 
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
       child: Container(
         decoration: BoxDecoration(
           color: c.surface,
@@ -284,7 +312,8 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
 
   Widget _header(AppPalette c, AppTextStyles t, Color secColor) {
     final priority = widget.habit.priority;
-    final showPriorityDot = priority != HabitPriority.normal && priority != HabitPriority.low;
+    final showPriorityDot =
+        priority != HabitPriority.normal && priority != HabitPriority.low;
     final priorityColor = switch (priority) {
       HabitPriority.high => c.amber,
       HabitPriority.critical => c.negative,
@@ -300,9 +329,16 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
             decoration: BoxDecoration(
               color: secColor.withValues(alpha: 0.13),
               borderRadius: BorderRadius.circular(AppRadii.chip),
-              border: Border.all(color: secColor.withValues(alpha: 0.25), width: 0.5),
+              border: Border.all(
+                color: secColor.withValues(alpha: 0.25),
+                width: 0.5,
+              ),
             ),
-            child: Icon(habitIcon(widget.habit.icon), size: 20, color: secColor),
+            child: Icon(
+              habitIcon(widget.habit.icon),
+              size: 20,
+              color: secColor,
+            ),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -339,7 +375,7 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  _sectionLabel(widget.habit.section),
+                  _sectionLabel(widget.habit.sectionId.toSectionEnum()),
                   style: TextStyle(
                     fontFamily: 'Inter',
                     fontSize: 11.5,
@@ -353,9 +389,9 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
           ),
           if (_mode == HabitSheetMode.compact)
             _CircleIconBtn(
-              icon: LucideIcons.arrowUpRight,
-              tooltip: 'Open detail',
-              onTap: _viewDetails,
+              icon: LucideIcons.pencil,
+              tooltip: 'Edit habit',
+              onTap: _editHabit,
             ),
         ],
       ),
@@ -387,7 +423,7 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
           _CompactStepper(
             currentValue: _currentValue,
             goal: widget.habit.goalValue!,
-            unit: _unitLabelFor(widget.habit.goalType!),
+            unit: goalUnitLabel(widget.habit.goalType!, widget.habit.goalUnit),
             sectionColor: secColor,
             onAdd: _addToValue,
             onSet: _setValue,
@@ -439,14 +475,18 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
                 label: 'Broke it',
                 color: c.negative,
                 selected: _breakingOutcome == _BreakingOutcome.brokeIt,
-                onTap: () => setState(() => _breakingOutcome = _BreakingOutcome.brokeIt),
+                onTap: () =>
+                    setState(() => _breakingOutcome = _BreakingOutcome.brokeIt),
               ),
             ),
           ],
         ),
         if (_breakingOutcome == _BreakingOutcome.brokeIt) ...[
           const SizedBox(height: 12),
-          Text('Trigger', style: t.label.copyWith(fontSize: 11, letterSpacing: 1.2)),
+          Text(
+            'Trigger',
+            style: t.label.copyWith(fontSize: 11, letterSpacing: 1.2),
+          ),
           const SizedBox(height: 8),
           Wrap(
             spacing: 6,
@@ -454,11 +494,14 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
             children: _triggers.map((trig) {
               final selected = _selectedTrigger == trig;
               return GestureDetector(
-                onTap: () => setState(
-                    () => _selectedTrigger = selected ? null : trig),
+                onTap: () =>
+                    setState(() => _selectedTrigger = selected ? null : trig),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 130),
-                  padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 11,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: selected
                         ? c.negative.withValues(alpha: 0.12)
@@ -499,11 +542,17 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
                     width: 18,
                     height: 18,
                     child: CircularProgressIndicator(
-                        strokeWidth: 2, color: c.onAccent),
+                      strokeWidth: 2,
+                      color: c.onAccent,
+                    ),
                   )
                 : const Text(
                     'Save',
-                    style: TextStyle(fontFamily: 'Inter', fontSize: 14.5, fontWeight: FontWeight.w700),
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
           ),
         ),
@@ -527,7 +576,10 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
               padding: const EdgeInsets.symmetric(vertical: 10),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(AppRadii.button),
-                border: Border.all(color: c.accent.withValues(alpha: 0.35), width: 0.5),
+                border: Border.all(
+                  color: c.accent.withValues(alpha: 0.35),
+                  width: 0.5,
+                ),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -553,13 +605,20 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
   }
 
   Widget _compactPrimaryCta(AppPalette c, Color secColor) {
-    final isTimer = widget.habit.type == HabitType.positive &&
+    // The countdown timer only makes sense for minute-scale durations — an
+    // hours goal (e.g. sleep) uses the numeric stepper instead.
+    final durationInMinutes =
+        widget.habit.goalUnit == null || widget.habit.goalUnit == 'min';
+    final isTimer =
+        widget.habit.type == HabitType.positive &&
         widget.habit.goalType == GoalType.durationMin &&
+        durationInMinutes &&
         (widget.habit.goalValue ?? 0) > 0 &&
         !_isDone;
     // Photo-proof gate: the user must capture a photo before the habit can
     // flip to done. Once `_proofPath` is set, completion proceeds normally.
-    final needsProof = widget.habit.photoProofEnabled &&
+    final needsProof =
+        widget.habit.photoProofEnabled &&
         widget.habit.type == HabitType.positive &&
         !_isDone &&
         _proofPath == null;
@@ -576,7 +635,7 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
       icon = LucideIcons.play;
     } else if (_hasNumericGoal) {
       final goal = widget.habit.goalValue!;
-      final unit = _unitLabelFor(widget.habit.goalType!);
+      final unit = goalUnitLabel(widget.habit.goalType!, widget.habit.goalUnit);
       if (_currentValue <= 0) {
         label = 'Log ${_trimZero(goal)} $unit';
       } else if (_currentValue >= goal) {
@@ -682,9 +741,7 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
               Expanded(
                 child: _MetaPill(
                   icon: LucideIcons.pencil,
-                  label: _noteCtrl.text.isEmpty
-                      ? 'Add note'
-                      : 'Note ·  ✓',
+                  label: _noteCtrl.text.isEmpty ? 'Add note' : 'Note ·  ✓',
                   active: _noteExpanded || _noteCtrl.text.isNotEmpty,
                   accent: secColor,
                   onTap: () => setState(() => _noteExpanded = !_noteExpanded),
@@ -702,8 +759,9 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
                 child: GestureDetector(
                   onTap: () {
                     HapticFeedback.selectionClick();
-                    setState(() => _effortRating =
-                        _effortRating == star ? 0 : star);
+                    setState(
+                      () => _effortRating = _effortRating == star ? 0 : star,
+                    );
                   },
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 8),
@@ -738,8 +796,10 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
               hintText: 'How did it go?',
               hintStyle: t.body.copyWith(color: c.textMuted, fontSize: 13),
               isDense: true,
-              contentPadding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
                 borderSide: BorderSide(color: c.border, width: 0.5),
@@ -769,7 +829,9 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: _isBreaking ? _buildBreakingBody(c, t) : _buildPositiveBody(c, t),
+          child: _isBreaking
+              ? _buildBreakingBody(c, t)
+              : _buildPositiveBody(c, t),
         ),
         const SizedBox(height: 18),
         Padding(
@@ -784,7 +846,9 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: c.onAccent),
+                        strokeWidth: 2,
+                        color: c.onAccent,
+                      ),
                     )
                   : const Text('Save'),
             ),
@@ -795,7 +859,7 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
   }
 
   Widget _buildPositiveBody(AppPalette c, AppTextStyles t) {
-    final secColor = widget.habit.section.color(c);
+    final secColor = widget.habit.sectionId.sectionColor(c);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -804,7 +868,7 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
             valueCtrl: _valueCtrl,
             current: _currentValue,
             goal: widget.habit.goalValue!,
-            unit: _unitLabelFor(widget.habit.goalType!),
+            unit: goalUnitLabel(widget.habit.goalType!, widget.habit.goalUnit),
             sectionColor: secColor,
             onChanged: (_) => setState(() {
               final goal = widget.habit.goalValue ?? 0;
@@ -822,11 +886,11 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
             width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 16),
             decoration: BoxDecoration(
-              color: _isDone ? c.positive.withValues(alpha: 0.12) : c.surfaceElevated,
+              color: _isDone
+                  ? c.positive.withValues(alpha: 0.12)
+                  : c.surfaceElevated,
               borderRadius: BorderRadius.circular(AppRadii.button),
-              border: Border.all(
-                color: _isDone ? c.positive : c.border,
-              ),
+              border: Border.all(color: _isDone ? c.positive : c.border),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -860,7 +924,8 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
               final filled = star <= _effortRating;
               return GestureDetector(
                 onTap: () => setState(
-                    () => _effortRating = _effortRating == star ? 0 : star),
+                  () => _effortRating = _effortRating == star ? 0 : star,
+                ),
                 child: Padding(
                   padding: const EdgeInsets.only(right: 8),
                   child: Icon(
@@ -959,15 +1024,16 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
                     setState(() => _selectedTrigger = selected ? null : trig),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 130),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 7,
+                  ),
                   decoration: BoxDecoration(
                     color: selected
                         ? c.negative.withValues(alpha: 0.12)
                         : c.surfaceElevated,
                     borderRadius: BorderRadius.circular(AppRadii.pill),
-                    border: Border.all(
-                      color: selected ? c.negative : c.border,
-                    ),
+                    border: Border.all(color: selected ? c.negative : c.border),
                   ),
                   child: Text(
                     trig,
@@ -975,8 +1041,7 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
                       fontFamily: 'Inter',
                       fontSize: 13,
                       color: selected ? c.negative : c.textSecondary,
-                      fontWeight:
-                          selected ? FontWeight.w600 : FontWeight.w500,
+                      fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
                     ),
                   ),
                 ),
@@ -1005,15 +1070,18 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
     if (_mode == HabitSheetMode.compact) {
       return Padding(
         padding: EdgeInsets.fromLTRB(
-            14, 4, 14, 12 + MediaQuery.of(context).padding.bottom),
+          14,
+          4,
+          14,
+          12 + MediaQuery.of(context).padding.bottom,
+        ),
         child: Row(
           children: [
             Expanded(
               child: TextButton.icon(
-                icon: Icon(LucideIcons.arrowUpRight,
-                    size: 14, color: c.textMuted),
+                icon: Icon(LucideIcons.pencil, size: 14, color: c.textMuted),
                 label: Text(
-                  'View details',
+                  'Edit',
                   style: TextStyle(
                     fontFamily: 'Inter',
                     fontSize: 12.5,
@@ -1024,13 +1092,12 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
                 style: TextButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 8),
                 ),
-                onPressed: _viewDetails,
+                onPressed: _editHabit,
               ),
             ),
             Expanded(
               child: TextButton.icon(
-                icon:
-                    Icon(LucideIcons.sliders, size: 14, color: c.textMuted),
+                icon: Icon(LucideIcons.sliders, size: 14, color: c.textMuted),
                 label: Text(
                   'More options',
                   style: TextStyle(
@@ -1051,14 +1118,12 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
       );
     }
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).padding.bottom + 4),
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).padding.bottom + 4,
+      ),
       child: const SizedBox.shrink(),
     );
   }
 
-  static String _sectionLabel(HabitSection s) => switch (s) {
-        HabitSection.athletic => 'Athletic',
-        HabitSection.body => 'Breaking',
-        HabitSection.mind => 'Building',
-      };
+  static String _sectionLabel(HabitSection s) => s.label;
 }

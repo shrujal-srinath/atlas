@@ -247,12 +247,43 @@ class _AtlasSwitch extends StatelessWidget {
 // Form controls.
 // ════════════════════════════════════════════════════════════════════
 
+/// Top-level repeat choice: every day, or a weekly cadence ("X / week") that
+/// then splits into exact-days vs flexible-count below.
 class _FreqRow extends StatelessWidget {
-  final FrequencyMode selected;
+  final bool isEveryDay;
   final Color accent;
-  final ValueChanged<FrequencyMode> onChanged;
+  final VoidCallback onEveryDay;
+  final VoidCallback onXWeek;
   const _FreqRow({
-    required this.selected,
+    required this.isEveryDay,
+    required this.accent,
+    required this.onEveryDay,
+    required this.onXWeek,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _Segmented(
+      index: isEveryDay ? 0 : 1,
+      colorFor: (_) => accent,
+      onChanged: (i) => i == 0 ? onEveryDay() : onXWeek(),
+      height: 44,
+      items: const [
+        _Seg('Every day'),
+        _Seg('X / week'),
+      ],
+    );
+  }
+}
+
+/// Sub-choice shown under "X / week": pin exact weekdays, or a flexible weekly
+/// count with rest days.
+class _XWeekModeRow extends StatelessWidget {
+  final bool exactDays;
+  final Color accent;
+  final ValueChanged<bool> onChanged; // true → exact days
+  const _XWeekModeRow({
+    required this.exactDays,
     required this.accent,
     required this.onChanged,
   });
@@ -260,15 +291,59 @@ class _FreqRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return _Segmented(
-      index: selected.index,
+      index: exactDays ? 0 : 1,
       colorFor: (_) => accent,
-      onChanged: (i) => onChanged(FrequencyMode.values[i]),
-      height: 44,
+      onChanged: (i) => onChanged(i == 0),
+      height: 46,
       items: const [
-        _Seg('Every day'),
-        _Seg('Specific days'),
-        _Seg('X / week'),
+        _Seg('Exact days', icon: LucideIcons.calendarDays),
+        _Seg('Flexible count', icon: LucideIcons.repeat2),
       ],
+    );
+  }
+}
+
+/// Caption under the flexible-count field: turns "X / week" into the plain-
+/// language promise — "any X days, Y flexible rest days". Updates live with the
+/// count field. (The rest-day *action* itself ships in Phase 2.)
+class _RestDayHint extends StatelessWidget {
+  final TextEditingController controller;
+  final Color accent;
+  const _RestDayHint({required this.controller, required this.accent});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final t = context.t;
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: controller,
+      builder: (context, value, _) {
+        final x = int.tryParse(value.text.trim()) ?? 0;
+        final ok = x >= 1 && x <= 7;
+        final rest = (7 - x).clamp(0, 7);
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: c.surfaceElevated,
+            borderRadius: BorderRadius.circular(AppRadii.card),
+            border: Border.all(color: c.border, width: 0.5),
+          ),
+          child: Row(
+            children: [
+              Icon(LucideIcons.coffee, size: 15, color: accent),
+              const SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  ok
+                      ? 'Shows every day — finish it any $x ${x == 1 ? 'day' : 'days'} a week, with $rest flexible rest ${rest == 1 ? 'day' : 'days'}.'
+                      : 'Enter how many days a week (1–7).',
+                  style: t.meta.copyWith(color: c.textSecondary, height: 1.3),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -918,7 +993,7 @@ class _ReplacementPicker extends ConsumerWidget {
     final c = context.c;
     final habits = ref.watch(habitsProvider).valueOrNull ?? const [];
     final builders = habits
-        .where((h) => h.section == HabitSection.mind && !h.isArchived)
+        .where((h) => h.sectionId == 'mind' && !h.isArchived)
         .toList();
 
     if (builders.isEmpty) {

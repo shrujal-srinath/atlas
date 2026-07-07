@@ -91,7 +91,7 @@ final upcomingRemindersProvider =
       timeLabel: t.time,
       scheduledAt: at,
       icon: habitIcon(t.habit.icon),
-      section: t.habit.section,
+      section: t.habit.sectionId.toSectionEnum(),
       route: '/habit/${t.habit.id}',
       isDone: false,
     ));
@@ -114,7 +114,7 @@ final upcomingRemindersProvider =
       timeLabel: h.reminderTime,
       scheduledAt: at,
       icon: habitIcon(h.icon),
-      section: h.section,
+      section: h.sectionId.toSectionEnum(),
       route: '/habit/${h.id}',
       isDone: false,
     ));

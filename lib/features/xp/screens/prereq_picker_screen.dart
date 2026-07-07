@@ -18,6 +18,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/atlas_controls.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../shared/models/models.dart';
+import '../../home/scoring/section_def.dart';
 import '../../../shared/widgets/atlas_back_button.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../habits/providers/habit_provider.dart';
@@ -37,6 +38,13 @@ class PrereqPickerScreen extends ConsumerWidget {
     final habitsAsync = ref.watch(habitsProvider);
     final habits = habitsAsync.valueOrNull ?? const <Habit>[];
     final chosen = prereqsAsync.valueOrNull ?? const <LevelPrereq>[];
+    // Live derived progress for each chosen milestone, keyed by id.
+    final progressById = {
+      for (final p
+          in ref.watch(prereqProgressProvider(level)).valueOrNull ??
+              const <PrereqProgress>[])
+        p.def.id: p,
+    };
 
     return Scaffold(
       backgroundColor: c.background,
@@ -92,6 +100,7 @@ class PrereqPickerScreen extends ConsumerWidget {
                           _ChosenRow(
                             prereq: p,
                             label: describePrereq(p, habits),
+                            progress: progressById[p.id],
                             onRemove: () => _remove(ref, p),
                           ),
                           const SizedBox(height: 8),
@@ -180,7 +189,7 @@ class PrereqPickerScreen extends ConsumerWidget {
   }
 
   Habit? _pickFirstAthletic(List<Habit> habits) =>
-      habits.where((h) => h.section == HabitSection.athletic).firstOrNull;
+      habits.where((h) => h.sectionId.toSectionEnum() == HabitSection.athletic).firstOrNull;
 
   LevelPrereq _make(PrereqKind kind, Map<String, dynamic> config) {
     final id = const Uuid().v4();
@@ -499,10 +508,12 @@ class _SuggestionChip extends StatelessWidget {
 class _ChosenRow extends StatelessWidget {
   final LevelPrereq prereq;
   final String label;
+  final PrereqProgress? progress;
   final VoidCallback onRemove;
   const _ChosenRow({
     required this.prereq,
     required this.label,
+    required this.progress,
     required this.onRemove,
   });
 
@@ -510,43 +521,165 @@ class _ChosenRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.c;
     final color = _kindColor(c, prereq.kind);
+    final p = progress;
+    final isMet = p?.isMet ?? false;
+    final isExpired = p?.isExpired ?? false;
+    final cur = p?.currentProgress ?? 0;
+    final tgt = (p?.target ?? prereq.target).clamp(1, 1 << 30);
+    final frac = (cur / tgt).clamp(0.0, 1.0);
+
     return Container(
-      padding: const EdgeInsets.fromLTRB(13, 12, 6, 12),
+      padding: const EdgeInsets.fromLTRB(13, 11, 6, 12),
       decoration: BoxDecoration(
         color: c.surface,
         borderRadius: BorderRadius.circular(AppRadii.card),
-        border: Border.all(color: c.border, width: 0.5),
+        border: Border.all(
+          color: isMet
+              ? c.positive.withValues(alpha: 0.5)
+              : isExpired
+                  ? c.negative.withValues(alpha: 0.4)
+                  : c.border,
+          width: 0.5,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 30,
+                height: 30,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.13),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                alignment: Alignment.center,
+                child: isMet
+                    ? Icon(LucideIcons.check, size: 16, color: c.positive)
+                    : Icon(_kindIcon(prereq.kind), size: 15, color: color),
+              ),
+              const SizedBox(width: 11),
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: c.textPrimary,
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              IconButton(
+                icon: Icon(LucideIcons.x, size: 16, color: c.textMuted),
+                onPressed: onRemove,
+                tooltip: 'Remove',
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
+          // Progress bar + status line (once derived progress is available).
+          if (p != null) ...[
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.only(left: 41, right: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(99),
+                    child: TweenAnimationBuilder<double>(
+                      tween: Tween<double>(end: frac),
+                      duration: const Duration(milliseconds: 600),
+                      curve: Curves.easeOutCubic,
+                      builder: (_, v, _) => LinearProgressIndicator(
+                        value: v,
+                        minHeight: 5,
+                        backgroundColor: c.surfaceElevated,
+                        valueColor: AlwaysStoppedAnimation(
+                          isMet ? c.positive : isExpired ? c.negative : color,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Row(
+                    children: [
+                      Text(
+                        isMet
+                            ? 'Complete'
+                            : isExpired
+                                ? 'Time’s up'
+                                : '$cur / $tgt',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: isMet
+                              ? c.positive
+                              : isExpired
+                                  ? c.negative
+                                  : c.textSecondary,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                      const Spacer(),
+                      if (!isMet && p.daysLeft != null)
+                        _DaysLeftPill(daysLeft: p.daysLeft!, expired: isExpired),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Small pill showing the timeframe runway (or "Last day" / "Expired").
+class _DaysLeftPill extends StatelessWidget {
+  final int daysLeft;
+  final bool expired;
+  const _DaysLeftPill({required this.daysLeft, required this.expired});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final urgent = daysLeft <= 3;
+    final color = expired
+        ? c.negative
+        : urgent
+            ? c.amber
+            : c.textMuted;
+    final text = expired
+        ? 'Expired'
+        : daysLeft == 0
+            ? 'Last day'
+            : '$daysLeft days left';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(99),
       ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.13),
-              borderRadius: BorderRadius.circular(8),
+          Icon(LucideIcons.clock, size: 10, color: color),
+          const SizedBox(width: 3),
+          Text(
+            text,
+            style: TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: color,
             ),
-            alignment: Alignment.center,
-            child: Icon(_kindIcon(prereq.kind), size: 15, color: color),
-          ),
-          const SizedBox(width: 11),
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 13.5,
-                fontWeight: FontWeight.w600,
-                color: c.textPrimary,
-              ),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          IconButton(
-            icon: Icon(LucideIcons.x, size: 16, color: c.textMuted),
-            onPressed: onRemove,
-            tooltip: 'Remove',
           ),
         ],
       ),
@@ -719,7 +852,7 @@ Future<Habit?> showHabitPickerSheet(
                   separatorBuilder: (_, _) => const SizedBox(height: 8),
                   itemBuilder: (_, i) {
                     final h = habits[i];
-                    final color = h.section.color(c);
+                    final color = h.sectionId.sectionColor(c);
                     return Material(
                       color: Colors.transparent,
                       child: InkWell(
@@ -755,7 +888,7 @@ Future<Habit?> showHabitPickerSheet(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(h.name, style: ctx.t.bodyStrong),
-                                    Text(_sectionLabel(h.section),
+                                    Text(_sectionLabel(h.sectionId.toSectionEnum()),
                                         style: AppType.meta
                                             .copyWith(color: c.textMuted)),
                                   ],
@@ -868,7 +1001,7 @@ class _CustomPrereqSheetState extends State<_CustomPrereqSheet> {
                     : habitIcon(_habit!.icon),
                 color: _habit == null
                     ? c.textMuted
-                    : _habit!.section.color(c),
+                    : _habit!.sectionId.sectionColor(c),
                 label: _habit?.name ?? 'Choose a task',
                 muted: _habit == null,
                 onTap: _pickHabit,
@@ -1048,7 +1181,7 @@ class _KindChips extends StatelessWidget {
                   Text(
                     _kindChip(k).label,
                     style: AppType.label.copyWith(
-                      color: selected == k ? c.accent : c.textSecondary,
+                      color: selected == k ? c.textPrimary : c.textSecondary,
                       fontWeight:
                           selected == k ? FontWeight.w700 : FontWeight.w500,
                     ),
@@ -1228,7 +1361,7 @@ class _TimeframeChips extends StatelessWidget {
               child: Text(
                 o.label,
                 style: AppType.label.copyWith(
-                  color: selected == o.days ? c.accent : c.textSecondary,
+                  color: selected == o.days ? c.textPrimary : c.textSecondary,
                   fontWeight:
                       selected == o.days ? FontWeight.w700 : FontWeight.w500,
                 ),
@@ -1240,8 +1373,4 @@ class _TimeframeChips extends StatelessWidget {
   }
 }
 
-String _sectionLabel(HabitSection s) => switch (s) {
-      HabitSection.athletic => 'Athletic',
-      HabitSection.mind => 'Mind',
-      HabitSection.body => 'Body',
-    };
+String _sectionLabel(HabitSection s) => s.label;

@@ -242,7 +242,7 @@ final userStatsProvider = FutureProvider<UserStats>((ref) async {
         eligibleHabits.every((h) => dayLogs.any((l) => l.habitId == h.id));
     for (final l in dayLogs) {
       final h = habitById[l.habitId];
-      if (h != null) sectionsCovered.add(h.section);
+      if (h != null) sectionsCovered.add(h.sectionId.toSectionEnum());
     }
     if (sectionsCovered.length == HabitSection.values.length) trifectaDays++;
     if (perfect) {
@@ -359,6 +359,9 @@ Future<bool> _comebackHit() async {
 
 bool _appliesOn(Habit h, DateTime date) {
   if (h.isArchived) return false;
+  // Days before the habit existed aren't scheduled — so a pre-creation day
+  // never breaks a "perfect run" style achievement.
+  if (!h.existedOn(date)) return false;
   if (h.type == HabitType.todo) return true;
   switch (h.frequencyMode) {
     case FrequencyMode.everyDay:

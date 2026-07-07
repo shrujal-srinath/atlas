@@ -16,6 +16,8 @@ import '../../food/screens/food_detail_screen.dart'; // FoodSelection
 import '../../food/screens/food_search_sheet.dart'; // FoodSearchSheet
 import '../models/habit_food_link.dart';
 import '../providers/habit_provider.dart';
+import '../../home/providers/home_providers.dart'; // sectionsProvider
+import '../../home/scoring/section_def.dart'; // SectionDef, sectionColorForKey
 
 part 'habit_creation_fields.dart';
 part 'habit_creation_rows.dart';
@@ -46,7 +48,7 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
 
   String _iconKey = 'run';
   String _colorKey = 'teal';
-  HabitSection _section = HabitSection.athletic;
+  String _sectionId = kAthleticId;
   HabitType _type = HabitType.positive;
   HabitPriority _priority = HabitPriority.normal;
   List<int> _days = [1, 2, 3, 4, 5, 6, 7];
@@ -54,6 +56,7 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
   TimePeriod? _timePeriod;
   TimeOfDay? _scheduledTime;
   GoalType? _goalType;
+  String? _goalUnit;
   bool _effortRating = false;
   bool _note = false;
   bool _photoProof = false;
@@ -80,8 +83,8 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
     if (h != null) {
       _nameCtrl.text = h.name;
       _iconKey = h.icon;
-      _colorKey = h.colorKey ?? _colorForSection(h.section);
-      _section = h.section;
+      _colorKey = h.colorKey ?? _colorForSection(h.sectionId.toSectionEnum());
+      _sectionId = h.sectionId;
       _type = h.type;
       _priority = h.priority;
       _days = List.of(h.daysOfWeek);
@@ -90,6 +93,7 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
       _timePeriod = h.timePeriod;
       if (h.scheduledTime != null) _scheduledTime = _parseHHmm(h.scheduledTime!);
       _goalType = h.goalType;
+      _goalUnit = h.goalUnit;
       if (h.goalValue != null) _goalCtrl.text = _fmtNum(h.goalValue!);
       _effortRating = h.effortRatingEnabled;
       _note = h.noteEnabled;
@@ -105,13 +109,18 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
       _foodLink = HabitFoodLink.fromRaw(h.foodLinkRaw);
     } else if (widget.initialType != null) {
       _type = widget.initialType!;
-      _section = switch (_type) {
-        HabitType.positive => HabitSection.athletic,
-        HabitType.negative => HabitSection.body,
-        HabitType.todo => HabitSection.mind,
+      _sectionId = switch (_type) {
+        HabitType.positive => kAthleticId,
+        HabitType.negative => kBodyId,
+        HabitType.todo => kMindId,
       };
-      _colorKey = _colorForSection(_section);
-      if (_isTodo) _freq = FrequencyMode.specificDays;
+      _colorKey = _colorForSection(_sectionId.toSectionEnum());
+      if (_isTodo) {
+        _freq = FrequencyMode.specificDays;
+      } else if (_isBreaking) {
+        // Negatives are always everyday — no scheduling.
+        _freq = FrequencyMode.everyDay;
+      }
     }
   }
 
@@ -162,6 +171,29 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
       _toast('Pick a due date for this todo', isError: true);
       return;
     }
+    // A week only has 7 days — anything else can never be completed, which
+    // silently breaks that habit's streak/completion math forever.
+    if (_freq == FrequencyMode.timesPerWeek) {
+      final twp = int.tryParse(_twpCtrl.text);
+      if (twp == null || twp < 1 || twp > 7) {
+        _toast('Times per week must be between 1 and 7', isError: true);
+        return;
+      }
+    }
+    if (_goalType != null && _goalCtrl.text.isNotEmpty) {
+      final goal = double.tryParse(_goalCtrl.text);
+      if (goal == null || goal <= 0 || goal > 100000) {
+        _toast('Enter a valid goal amount', isError: true);
+        return;
+      }
+    }
+    if (_endMode == EndMode.afterDays && _endDaysCtrl.text.isNotEmpty) {
+      final days = int.tryParse(_endDaysCtrl.text);
+      if (days == null || days <= 0 || days > 3650) {
+        _toast('Enter a number of days between 1 and 3650', isError: true);
+        return;
+      }
+    }
     setState(() => _saving = true);
 
     final session = ref.read(sessionProvider);
@@ -183,7 +215,7 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
       'name': _nameCtrl.text.trim(),
       'icon': _iconKey,
       'color_key': _colorKey,
-      'section': _section.name,
+      'section': _sectionId,
       'type': _type.name,
       'days_of_week': daysToSave,
       'frequency_mode': Habit.freqToDb(_freq),
@@ -192,11 +224,14 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
       if (_goalType != null && _goalCtrl.text.isNotEmpty)
         'goal_value': double.tryParse(_goalCtrl.text),
       if (_goalType != null) 'goal_type': _goalType!.name,
+      // Value is stored in the chosen unit (ratio scoring is unit-agnostic);
+      // goal_unit records it so it displays as "8 hr" not "480 min".
+      if (_goalType != null && _goalUnit != null) 'goal_unit': _goalUnit,
       'priority': _priority.name,
       'effort_rating_enabled': _effortRating,
       'note_enabled': _note,
       'photo_proof_enabled': _photoProof,
-      if (_section == HabitSection.mind && _skillCtrl.text.isNotEmpty)
+      if (_sectionId == kMindId && _skillCtrl.text.isNotEmpty)
         'skill_category': _skillCtrl.text.trim(),
       if (_replacementHabitId != null)
         'replacement_habit_id': _replacementHabitId,
@@ -347,14 +382,14 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
                 _Label('Section'),
                 const SizedBox(height: 8),
                 _SectionRow(
-                  selected: _section,
-                  onChanged: (s) => setState(() {
-                    _section = s;
+                  selectedId: _sectionId,
+                  onChanged: (id) => setState(() {
+                    _sectionId = id;
                     // If user hasn't picked a custom color yet, follow the section.
                     if (_colorKey == 'athletic' ||
                         _colorKey == 'building' ||
                         _colorKey == 'breaking') {
-                      _colorKey = _colorForSection(s);
+                      _colorKey = _colorForSection(id.toSectionEnum());
                     }
                   }),
                 ),
@@ -386,6 +421,27 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
                 ),
               ],
             )
+          else if (_isBreaking)
+            _BentoSection(
+              title: 'Schedule',
+              subtitle: 'Tracked every day',
+              children: [
+                Row(
+                  children: [
+                    Icon(LucideIcons.calendarCheck, size: 15, color: _accent),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'This runs every day. Each day starts clean — you only '
+                        'log a slip if you break it.',
+                        style: AppType.meta
+                            .copyWith(color: context.c.textMuted, height: 1.4),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            )
           else
             _BentoSection(
               title: 'Schedule',
@@ -394,31 +450,51 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
                 _Label('Repeat'),
                 const SizedBox(height: 8),
                 _FreqRow(
-                  selected: _freq,
+                  isEveryDay: _freq == FrequencyMode.everyDay,
                   accent: _accent,
-                  onChanged: (f) => setState(() => _freq = f),
+                  onEveryDay: () =>
+                      setState(() => _freq = FrequencyMode.everyDay),
+                  // Entering "X / week" defaults to flexible count; if the user
+                  // already had a weekly cadence, keep their sub-choice.
+                  onXWeek: () => setState(() {
+                    if (_freq == FrequencyMode.everyDay) {
+                      _freq = FrequencyMode.timesPerWeek;
+                    }
+                  }),
                 ),
-                if (_freq == FrequencyMode.specificDays) ...[
+                if (_freq != FrequencyMode.everyDay) ...[
                   const SizedBox(height: 10),
-                  _DaysRow(
-                    selected: _days,
+                  _XWeekModeRow(
+                    exactDays: _freq == FrequencyMode.specificDays,
                     accent: _accent,
-                    onToggle: (d) => setState(() {
-                      if (_days.contains(d)) {
-                        _days = _days.where((x) => x != d).toList();
-                      } else {
-                        _days = [..._days, d]..sort();
-                      }
-                    }),
+                    onChanged: (exact) => setState(() => _freq = exact
+                        ? FrequencyMode.specificDays
+                        : FrequencyMode.timesPerWeek),
                   ),
-                ] else if (_freq == FrequencyMode.timesPerWeek) ...[
-                  const SizedBox(height: 10),
-                  _BentoField(
-                    controller: _twpCtrl,
-                    hint: '3',
-                    suffix: 'times / week',
-                    keyboard: TextInputType.number,
-                  ),
+                  if (_freq == FrequencyMode.specificDays) ...[
+                    const SizedBox(height: 10),
+                    _DaysRow(
+                      selected: _days,
+                      accent: _accent,
+                      onToggle: (d) => setState(() {
+                        if (_days.contains(d)) {
+                          _days = _days.where((x) => x != d).toList();
+                        } else {
+                          _days = [..._days, d]..sort();
+                        }
+                      }),
+                    ),
+                  ] else ...[
+                    const SizedBox(height: 10),
+                    _BentoField(
+                      controller: _twpCtrl,
+                      hint: '3',
+                      suffix: 'times / week',
+                      keyboard: TextInputType.number,
+                    ),
+                    const SizedBox(height: 10),
+                    _RestDayHint(controller: _twpCtrl, accent: _accent),
+                  ],
                 ],
                 const SizedBox(height: 16),
                 _Label('Do it at'),
@@ -459,18 +535,20 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
                 ? 'Replacement & how to track'
                 : 'How much counts as done',
             children: [
-              _Label('Daily goal'),
-              const SizedBox(height: 8),
-              _PickerRow(
-                icon: LucideIcons.target,
-                label: _goalType == null
-                    ? 'Off'
-                    : '${_goalCtrl.text.isEmpty ? "—" : _goalCtrl.text} '
-                        '${_goalUnitLabel(_goalType!)}',
-                accent: _accent,
-                onTap: _openGoalSheet,
-              ),
-              if (_section == HabitSection.mind && !_isTodo) ...[
+              if (!_isBreaking) ...[
+                _Label('Daily goal'),
+                const SizedBox(height: 8),
+                _PickerRow(
+                  icon: LucideIcons.target,
+                  label: _goalType == null
+                      ? 'Off'
+                      : '${_goalCtrl.text.isEmpty ? "—" : _goalCtrl.text} '
+                          '${goalUnitLabel(_goalType!, _goalUnit)}',
+                  accent: _accent,
+                  onTap: _openGoalSheet,
+                ),
+              ],
+              if (_sectionId == kMindId && !_isTodo) ...[
                 const SizedBox(height: 14),
                 _Label('Skill category'),
                 const SizedBox(height: 8),
@@ -640,14 +718,6 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
     );
   }
 
-  String _goalUnitLabel(GoalType g) => switch (g) {
-        GoalType.reps => 'reps',
-        GoalType.durationMin => 'min',
-        GoalType.distanceKm => 'km',
-        GoalType.litres => 'L',
-        GoalType.custom => 'units',
-      };
-
   Future<void> _pickScheduledTime() async {
     final picked = await showTimePicker(
       context: context,
@@ -666,34 +736,45 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
 
   Future<void> _pickEndDate() async {
     final now = DateTime.now();
+    // Date-only floor. `firstDate: now` (with a time component) would reject an
+    // initialDate at midnight — including a saved end date of *today* — so both
+    // the bounds and the seed are normalized, and a past saved date is clamped
+    // up to today (editing an already-ended habit must never crash the picker).
+    final first = DateTime(now.year, now.month, now.day);
+    final seed = _endDate ?? first.add(const Duration(days: 30));
     final picked = await showDatePicker(
       context: context,
-      initialDate: _endDate ?? now.add(const Duration(days: 30)),
-      firstDate: now,
-      lastDate: now.add(const Duration(days: 3650)),
+      initialDate: seed.isBefore(first) ? first : seed,
+      firstDate: first,
+      lastDate: first.add(const Duration(days: 3650)),
     );
     if (picked != null) setState(() => _endDate = picked);
   }
 
   Future<void> _pickDueDate() async {
     final now = DateTime.now();
+    // See _pickEndDate — an overdue todo (due date in the past) must not crash
+    // the picker; its seed is clamped up to today.
+    final first = DateTime(now.year, now.month, now.day);
+    final seed = _dueDate ?? first;
     final picked = await showDatePicker(
       context: context,
-      initialDate: _dueDate ?? now,
-      firstDate: now,
-      lastDate: now.add(const Duration(days: 3650)),
+      initialDate: seed.isBefore(first) ? first : seed,
+      firstDate: first,
+      lastDate: first.add(const Duration(days: 3650)),
     );
     if (picked != null) setState(() => _dueDate = picked);
   }
 
   Future<void> _openGoalSheet() async {
-    final result = await showModalBottomSheet<({GoalType? type, String value})>(
+    final result = await showModalBottomSheet<GoalChoice>(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (_) => _GoalSheet(
         initialType: _goalType,
         initialValue: _goalCtrl.text,
+        initialUnit: _goalUnit,
         accent: _accent,
       ),
     );
@@ -701,6 +782,7 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
       setState(() {
         _goalType = result.type;
         _goalCtrl.text = result.value;
+        _goalUnit = result.unit;
       });
     }
   }

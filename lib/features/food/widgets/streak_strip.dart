@@ -39,40 +39,151 @@ class StreakStrip extends ConsumerWidget {
               return Row(
                 children: [
                   Container(
-                    width: 28,
-                    height: 28,
+                    width: 30,
+                    height: 30,
                     decoration: BoxDecoration(
                       color: c.accentSoft,
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(9),
                     ),
                     child: Icon(LucideIcons.calendarRange,
-                        size: 15, color: c.accent),
+                        size: 16, color: c.accent),
                   ),
-                  const SizedBox(width: 10),
-                  Text('FUELING',
-                      style: AppType.overline
-                          .copyWith(color: c.textMuted, letterSpacing: 1.2)),
-                  const SizedBox(width: 12),
-                  for (final d in days) ...[
-                    _Dot(day: d),
-                    const SizedBox(width: 6),
-                  ],
-                  const Spacer(),
-                  Text('$hits/7',
-                      style:
-                          AppType.numMd.copyWith(color: c.textPrimary, fontSize: 13)),
-                  const SizedBox(width: 4),
-                  Icon(LucideIcons.chevronRight, size: 16, color: c.textMuted),
+                  const SizedBox(width: 11),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Text('FUELING',
+                                style: AppType.overline.copyWith(
+                                    color: c.textMuted, letterSpacing: 1.2)),
+                            const Spacer(),
+                            Text('$hits',
+                                style: AppType.numMd.copyWith(
+                                    color: hits >= 5 ? c.positive : c.textPrimary,
+                                    fontSize: 13)),
+                            Text(' of 7 on target',
+                                style:
+                                    AppType.meta.copyWith(color: c.textMuted)),
+                            const SizedBox(width: 3),
+                            Icon(LucideIcons.chevronRight,
+                                size: 15, color: c.textMuted),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            for (final d in days)
+                              Expanded(
+                                child: Column(
+                                  children: [
+                                    _Dot(day: d),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      _weekdayLetter(d.date),
+                                      style: TextStyle(
+                                        fontFamily: 'Inter',
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w700,
+                                        color: d.isToday
+                                            ? c.accent
+                                            : c.textMuted,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               );
             },
-            loading: () => const SizedBox(height: 28),
-            error: (_, _) => const SizedBox(height: 28),
+            loading: () => _placeholderRow(context),
+            error: (_, _) => _placeholderRow(context),
           ),
         ),
       ),
     );
   }
+}
+
+/// Mon-first single-letter for a weekday.
+String _weekdayLetter(DateTime d) =>
+    const ['M', 'T', 'W', 'T', 'F', 'S', 'S'][d.weekday - 1];
+
+/// Loading / no-data shell — keeps the strip self-describing (icon · FUELING ·
+/// faded dots + weekday letters · chevron) instead of collapsing to a blank,
+/// mysterious pill. Mirrors the loaded layout so there's no height jump.
+Widget _placeholderRow(BuildContext context) {
+  final c = context.c;
+  final today = DateTime.now();
+  return Row(
+    children: [
+      Container(
+        width: 30,
+        height: 30,
+        decoration: BoxDecoration(
+          color: c.accentSoft,
+          borderRadius: BorderRadius.circular(9),
+        ),
+        child: Icon(LucideIcons.calendarRange, size: 16, color: c.accent),
+      ),
+      const SizedBox(width: 11),
+      Expanded(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text('FUELING',
+                    style: AppType.overline
+                        .copyWith(color: c.textMuted, letterSpacing: 1.2)),
+                const Spacer(),
+                Icon(LucideIcons.chevronRight, size: 15, color: c.textMuted),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                for (int i = 0; i < 7; i++)
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Container(
+                          width: 13,
+                          height: 13,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: c.textDim, width: 1),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          _weekdayLetter(
+                              today.subtract(Duration(days: 6 - i))),
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            fontSize: 9,
+                            fontWeight: FontWeight.w700,
+                            color: c.textMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    ],
+  );
 }
 
 class _Dot extends StatelessWidget {

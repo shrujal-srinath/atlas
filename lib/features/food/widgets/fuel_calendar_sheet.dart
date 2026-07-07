@@ -180,9 +180,11 @@ class _FuelCalendarSheetState extends ConsumerState<FuelCalendarSheet> {
             byDay: byDay,
             target: target,
             selected: _selected,
+            // Tap a day → jump the diary straight there (and close), so you can
+            // review or edit that day's meals. This is the diary's date switcher.
             onTapDay: (d) {
               HapticFeedback.selectionClick();
-              setState(() => _selected = d);
+              _openDay(d);
             },
           ),
           const SizedBox(height: 14),
@@ -397,7 +399,7 @@ class _DayDetail extends StatelessWidget {
           Icon(LucideIcons.calendarDays, size: 15, color: c.textMuted),
           const SizedBox(width: 8),
           Text(
-            'Tap a day to inspect it',
+            'Tap any day to open it',
             style: TextStyle(
               fontFamily: 'Inter',
               fontSize: 12.5,

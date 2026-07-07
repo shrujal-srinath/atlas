@@ -71,8 +71,8 @@ class _BackCircle extends StatelessWidget {
       onTap: () =>
           context.canPop() ? context.pop() : context.go('/login'),
       child: Container(
-        width: 42,
-        height: 42,
+        width: 48,
+        height: 48,
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: const Color(0x73FFFFFF),
@@ -80,7 +80,7 @@ class _BackCircle extends StatelessWidget {
           border: Border.all(color: AuthColors.glassBorder, width: 1),
         ),
         child: const Icon(LucideIcons.chevronLeft,
-            size: 20, color: AuthColors.ink),
+            size: 22, color: AuthColors.ink),
       ),
     );
   }

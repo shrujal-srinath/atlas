@@ -1,10 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/models/models.dart';
-import '../../../core/utils/streak_engine.dart';
+import '../../../core/utils/day_quality.dart';
 import '../../habits/providers/habit_provider.dart';
 import '../../home/providers/home_providers.dart';
 import '../../journal/domain/journal_entry.dart';
 import '../../journal/providers/journal_providers.dart';
+import '../../xp/leveling_providers.dart';
 
 // ── Data classes ───────────────────────────────────────────────
 
@@ -12,20 +13,6 @@ class DayScore {
   final DateTime date;
   final double score;
   const DayScore(this.date, this.score);
-}
-
-class HabitStreak {
-  final Habit habit;
-  final int streak;
-  const HabitStreak(this.habit, this.streak);
-}
-
-class SectionStats {
-  final HabitSection section;
-  final int total;
-  final int completed;
-  final double rate;
-  const SectionStats(this.section, this.total, this.completed, this.rate);
 }
 
 /// Mean score for one weekday over the window (rest days excluded).
@@ -46,14 +33,10 @@ class PeriodStat {
 }
 
 class AnalyticsData {
-  final List<DayScore> weekScores;
+  /// 28-day score series — consumed by the wellness × score correlation.
   final List<DayScore> monthScores;
-  final List<HabitStreak> streaks;
-  final List<SectionStats> sections;
   final double weekAvg;
   final double prevWeekAvg;
-  final int totalCompletions;
-  final int perfectDays;
   /// This-week vs last-week mean section ratio (0..1), for the week-compare card.
   final Map<HabitSection, double> weekSectionAvg;
   final Map<HabitSection, double> prevWeekSectionAvg;
@@ -62,14 +45,9 @@ class AnalyticsData {
   final List<PeriodStat> periods;
 
   const AnalyticsData({
-    required this.weekScores,
     required this.monthScores,
-    required this.streaks,
-    required this.sections,
     required this.weekAvg,
     required this.prevWeekAvg,
-    required this.totalCompletions,
-    required this.perfectDays,
     required this.weekSectionAvg,
     required this.prevWeekSectionAvg,
     required this.weekdays,
@@ -86,25 +64,19 @@ class AnalyticsData {
 final analyticsProvider = FutureProvider.autoDispose<AnalyticsData>((ref) async {
   final habits = await ref.watch(habitsProvider.future);
   final recentLogs = await ref.watch(recentHabitLogsProvider.future);
-  final now = DateTime.now();
-  final today = DateTime(now.year, now.month, now.day);
 
   // Helper: date string
   String ds(DateTime d) =>
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
-  // Fetch the modern HomeScore for the 28-day window once; every aggregate
-  // below reads from this map. Providers cache per-date, so Trends and Score
-  // share the same computation.
-  final monthDates = [
-    for (int i = 27; i >= 0; i--)
-      DateTime(today.year, today.month, today.day - i)
-  ];
-  final monthHomeScores = await Future.wait(
-    monthDates.map((d) => ref.watch(homeScoreProvider(d).future)),
-  );
-  final scoreByDate = <DateTime, HomeScore>{
-    for (int i = 0; i < monthDates.length; i++) monthDates[i]: monthHomeScores[i]
+  // One batched score series for the 28-day window (2 queries total via
+  // [dailyScoreSeriesProvider], not ~56 per-date fetches) — every aggregate
+  // below reads from this map, and it shares [computeDayScore] with the Score
+  // screen so the numbers always agree.
+  final monthSeries = await ref.watch(dailyScoreSeriesProvider(28).future);
+  final monthDates = [for (final p in monthSeries) p.date];
+  final scoreByDate = <DateTime, ScoredDayPoint>{
+    for (final p in monthSeries) p.date: p
   };
 
   int scoreFor(DateTime day) => scoreByDate[day]?.score ?? 0;
@@ -152,33 +124,7 @@ final analyticsProvider = FutureProvider.autoDispose<AnalyticsData>((ref) async 
   final weekSectionAvg = sectionAvg(monthDates.sublist(monthDates.length - 7));
   final prevWeekSectionAvg = sectionAvg(prevWeekDays);
 
-  // Streaks — sorted descending (per-habit; powers the leaderboard).
-  final streaks = habits
-      .map((h) => HabitStreak(h, calculateStreak(h, recentLogs)))
-      .where((s) => s.streak > 0)
-      .toList()
-    ..sort((a, b) => b.streak.compareTo(a.streak));
-
-  // Section stats (today) — completion counts for the "TODAY'S SECTIONS" card.
-  final todayHabits = habitsForDate(habits, today);
-  final todayLogs = recentLogs.where((l) => l.date == ds(today)).toList();
-  final sections = HabitSection.values.map((s) {
-    final secHabits = todayHabits.where((h) => h.section == s).toList();
-    final secDone = secHabits
-        .where((h) => todayLogs.any((l) => l.habitId == h.id && l.completed))
-        .length;
-    return SectionStats(
-      s,
-      secHabits.length,
-      secDone,
-      secHabits.isEmpty ? 0.0 : secDone / secHabits.length,
-    );
-  }).toList();
-
-  // One pass over the 28-day window for total completions + time-of-day
-  // (day-part) completion stats. The heatmap grid renders from the shared
-  // consistencyHeatmapProvider, which uses the same completion logic.
-  int totalCompletions = 0;
+  // One pass over the 28-day window for time-of-day (day-part) completion stats.
   const periodOrder = ['MORNING', 'AFTERNOON', 'EVENING', 'NIGHT'];
   final periodDone = {for (final p in periodOrder) p: 0};
   final periodSched = {for (final p in periodOrder) p: 0};
@@ -190,7 +136,6 @@ final analyticsProvider = FutureProvider.autoDispose<AnalyticsData>((ref) async 
       periodSched[p] = (periodSched[p] ?? 0) + 1;
       if (dayLogs.any((l) => l.habitId == h.id && l.completed)) {
         periodDone[p] = (periodDone[p] ?? 0) + 1;
-        totalCompletions++;
       }
     }
   }
@@ -216,18 +161,10 @@ final analyticsProvider = FutureProvider.autoDispose<AnalyticsData>((ref) async 
       )
   ];
 
-  // Perfect days — a true 100 per the XP system (kPerfectDayXp), not >= 99.5.
-  final perfectDays = monthScores.where((s) => s.score >= 100).length;
-
   return AnalyticsData(
-    weekScores: weekScores,
     monthScores: monthScores,
-    streaks: streaks,
-    sections: sections,
     weekAvg: weekAvg,
     prevWeekAvg: prevWeekAvg,
-    totalCompletions: totalCompletions,
-    perfectDays: perfectDays,
     weekSectionAvg: weekSectionAvg,
     prevWeekSectionAvg: prevWeekSectionAvg,
     weekdays: weekdays,
@@ -330,22 +267,122 @@ class SectionTrend {
   bool get isEmpty => dates.isEmpty;
 }
 
-/// [days] = 7 / 30 / 90. autoDispose so flipping the range frees the old window.
+/// [days] = 30 / 90. autoDispose so flipping the range frees the old window.
+///
+/// Plots a **7-day trailing moving average** of each section's daily ratio,
+/// starting at the user's first active day. Raw daily section ratios are nearly
+/// binary (0 or ~1), so an unsmoothed line whipsaws 0↔100 and reads as noise;
+/// the rolling average turns it into a legible section-vs-section trend. No-data
+/// days (nothing scheduled) are skipped inside the window, not counted as zero.
 final sectionTrendProvider =
     FutureProvider.autoDispose.family<SectionTrend, int>((ref, days) async {
-  final n = DateTime.now();
-  final today = DateTime(n.year, n.month, n.day);
-  final dates = [
-    for (int i = days - 1; i >= 0; i--) today.subtract(Duration(days: i))
-  ];
-  final scores = await Future.wait(
-    dates.map((d) => ref.watch(homeScoreProvider(d).future)),
-  );
-  final series = {for (final s in HabitSection.values) s: <double>[]};
-  for (final hs in scores) {
-    for (final s in HabitSection.values) {
-      series[s]!.add((hs.sectionPct[s] ?? 0) / 100.0);
-    }
+  final series = await ref.watch(dailyScoreSeriesProvider(days).future);
+  // Real, in-the-past days that actually had scheduled habits — drop future
+  // days and no-data days so the trend reflects performance, not empty calendar.
+  final active = [for (final p in series) if (!p.isFuture && p.total > 0) p];
+  if (active.length < 2) {
+    return SectionTrend(dates: [for (final p in active) p.date], series: {
+      for (final s in HabitSection.values)
+        s: [for (final p in active) (p.sectionPct[s] ?? 0) / 100.0],
+    });
   }
-  return SectionTrend(dates: dates, series: series);
+
+  final out = {
+    for (final s in HabitSection.values)
+      s: trailingMovingAverage(
+          [for (final p in active) (p.sectionPct[s] ?? 0) / 100.0], 7),
+  };
+  return SectionTrend(dates: [for (final p in active) p.date], series: out);
+});
+
+/// Trailing moving average of [xs] over a window of [w] (partial at the start:
+/// index i averages the up-to-[w] values ending at i). Pure — the smoothing
+/// behind the Section Trends chart, extracted so it's unit-testable.
+List<double> trailingMovingAverage(List<double> xs, int w) {
+  final out = <double>[];
+  for (int i = 0; i < xs.length; i++) {
+    final lo = (i - w + 1) < 0 ? 0 : (i - w + 1);
+    double sum = 0;
+    for (int j = lo; j <= i; j++) {
+      sum += xs[j];
+    }
+    out.add(sum / (i - lo + 1));
+  }
+  return out;
+}
+
+// ── Consistency streak (Duolingo-style hero) ───────────────────────────
+
+enum DayWinState { win, miss, rest, future }
+
+class DayWin {
+  final DateTime date;
+  final DayWinState state;
+  const DayWin(this.date, this.state);
+}
+
+/// Everything the streak hero needs: the current run (from the canonical
+/// [currentScoreStreakProvider], so it always matches the Overview badge), the
+/// best-ever run, and the last-7-days win/miss/rest strip. A "win" is a day
+/// scoring ≥ break-even (50); a rest day (nothing scheduled) is neutral.
+class ScoreStreakSummary {
+  final int current;
+  final int best;
+  final List<DayWin> week; // last 7 days, oldest → newest
+  const ScoreStreakSummary(this.current, this.best, this.week);
+}
+
+final scoreStreakSummaryProvider =
+    FutureProvider.autoDispose<ScoreStreakSummary>((ref) async {
+  final current = await ref.watch(currentScoreStreakProvider.future);
+  final series = await ref.watch(dailyScoreSeriesProvider(120).future);
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+
+  // Win/rest map for the best-run computation (rest days skip, don't break).
+  final byDay = <DateTime, bool?>{};
+  final byDate = <DateTime, ScoredDayPoint>{};
+  for (final p in series) {
+    final k = DateTime(p.date.year, p.date.month, p.date.day);
+    byDate[k] = p;
+    if (p.isFuture) continue;
+    byDay[k] = p.total == 0 ? null : p.score >= 50;
+  }
+  final best = streakSummary(byDay, today: today).best;
+
+  final week = <DayWin>[
+    for (int i = 6; i >= 0; i--)
+      () {
+        final d = today.subtract(Duration(days: i));
+        final p = byDate[d];
+        final st = d.isAfter(today)
+            ? DayWinState.future
+            : (p == null || p.total == 0)
+                ? DayWinState.rest
+                : (p.score >= 50 ? DayWinState.win : DayWinState.miss);
+        return DayWin(d, st);
+      }(),
+  ];
+  return ScoreStreakSummary(current, best, week);
+});
+
+// ── Consistency intensity (GitHub-style heatmap) ───────────────────────
+
+/// Per-day completion rate (0..1) across all habits over the last [days], for
+/// the intensity heatmap. Absent keys are rest days (nothing scheduled) — the
+/// heatmap renders those faintest. One query via [statsLogsProvider].
+final dayIntensityProvider =
+    FutureProvider.autoDispose.family<Map<DateTime, double>, int>(
+        (ref, days) async {
+  final habits = await ref.watch(habitsProvider.future);
+  final logs = await ref.watch(statsLogsProvider(days).future);
+  final now = DateTime.now();
+  final today = DateTime(now.year, now.month, now.day);
+  final out = <DateTime, double>{};
+  for (int i = 0; i < days; i++) {
+    final d = today.subtract(Duration(days: i));
+    final q = computeDayQuality(habits, logs, d);
+    if (!q.isRestDay) out[DateTime(d.year, d.month, d.day)] = q.rate;
+  }
+  return out;
 });

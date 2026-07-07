@@ -6,12 +6,14 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/atlas_controls.dart';
 import '../domain/food.dart';
 import '../domain/targets.dart';
+import '../food_colors.dart';
 import '../providers/food_providers.dart';
 import '../providers/health_score_providers.dart';
 import '../scoring/nutrition_score.dart';
 import 'calorie_ring.dart';
+import 'food_score_info_sheet.dart';
 import 'health_score_chip.dart';
-import 'hero_nutrition_card.dart';
+import 'phase_ui.dart';
 
 /// The diary's single fuel card. One section, top-to-bottom:
 ///   1. a settings bar (phase · score · gear → goals/meals, collapse chevron)
@@ -47,10 +49,12 @@ class _DiaryNutritionSummaryState extends ConsumerState<DiaryNutritionSummary> {
 
   Future<void> _addWater() async {
     HapticFeedback.lightImpact();
-    final repo = ref.read(foodRepositoryProvider);
-    final date = ref.read(diaryDateProvider);
-    await repo.addWater(250, date);
-    ref.invalidate(waterIntakeProvider);
+    await addWaterIntake(ref, 250);
+  }
+
+  Future<void> _removeWater() async {
+    HapticFeedback.selectionClick();
+    await removeWaterIntake(ref);
   }
 
   @override
@@ -61,6 +65,7 @@ class _DiaryNutritionSummaryState extends ConsumerState<DiaryNutritionSummary> {
     final phase = ref.watch(bodyPhaseProvider);
     final score = ref.watch(dayHealthScoreProvider);
     final water = ref.watch(waterIntakeProvider).valueOrNull ?? 0;
+    final waterTarget = ref.watch(waterTargetProvider);
 
     final remaining = (targets.kcal - totals.kcal).round();
     final over = remaining < 0;
@@ -114,7 +119,11 @@ class _DiaryNutritionSummaryState extends ConsumerState<DiaryNutritionSummary> {
                   PhasePill(phase: phase),
                 ],
                 const Spacer(),
-                HealthScoreChip(score: score, large: false),
+                HealthScoreChip(
+                  score: score,
+                  large: false,
+                  onTap: () => FoodScoreInfoSheet.show(context),
+                ),
                 const SizedBox(width: 2),
                 _IconBtn(
                   icon: LucideIcons.settings2,
@@ -147,33 +156,37 @@ class _DiaryNutritionSummaryState extends ConsumerState<DiaryNutritionSummary> {
             sizeCurve: Curves.easeOutCubic,
           ),
 
-          // ── 3. Log actions, pinned at the end ────────────────────
+          // ── 3. Water + log actions, pinned at the end ────────────
           Divider(
               height: 1, thickness: 0.5, color: c.border, indent: 12, endIndent: 12),
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-            child: Row(
+            padding: const EdgeInsets.fromLTRB(12, 11, 12, 12),
+            child: Column(
               children: [
-                Expanded(
-                  child: _QuickAction(
-                    icon: LucideIcons.plus,
-                    label: 'Log food',
-                    primary: true,
-                    onTap: widget.onAddMeal,
-                  ),
+                _WaterInline(
+                  ml: water,
+                  targetMl: waterTarget,
+                  onAdd: _addWater,
+                  onRemove: _removeWater,
                 ),
-                const SizedBox(width: 8),
-                _QuickAction(
-                  icon: LucideIcons.glassWater,
-                  label: '${(water / 1000).toStringAsFixed(1)}L',
-                  tint: c.athletic,
-                  onTap: _addWater,
-                ),
-                const SizedBox(width: 8),
-                _QuickAction(
-                  icon: LucideIcons.zap,
-                  tooltip: 'Quick add calories',
-                  onTap: widget.onQuickAdd,
+                const SizedBox(height: 11),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _QuickAction(
+                        icon: LucideIcons.plus,
+                        label: 'Log food',
+                        primary: true,
+                        onTap: widget.onAddMeal,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _QuickAction(
+                      icon: LucideIcons.zap,
+                      label: 'Quick add',
+                      onTap: widget.onQuickAdd,
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -270,7 +283,7 @@ class _Body extends StatelessWidget {
                     label: 'Protein',
                     value: totals.proteinG,
                     target: targets.proteinG,
-                    tint: c.athletic),
+                    tint: c.proteinColor),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -278,7 +291,7 @@ class _Body extends StatelessWidget {
                     label: 'Carbs',
                     value: totals.carbsG,
                     target: targets.carbsG,
-                    tint: c.amber),
+                    tint: c.carbsColor),
               ),
             ],
           ),
@@ -290,7 +303,7 @@ class _Body extends StatelessWidget {
                     label: 'Fat',
                     value: totals.fatG,
                     target: targets.fatG,
-                    tint: c.mind),
+                    tint: c.fatColor),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -298,7 +311,7 @@ class _Body extends StatelessWidget {
                     label: 'Fiber',
                     value: totals.fiberG,
                     target: targets.micros.fiberG,
-                    tint: c.positive),
+                    tint: c.fiberColor),
               ),
             ],
           ),
@@ -424,32 +437,28 @@ class _QuickAction extends StatelessWidget {
   final IconData icon;
   final String? label;
   final bool primary;
-  final Color? tint;
-  final String? tooltip;
   final VoidCallback? onTap;
   const _QuickAction({
     required this.icon,
     this.label,
     this.primary = false,
-    this.tint,
-    this.tooltip,
     this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    final accent = tint ?? c.accent;
-    final fg = primary ? c.onAccent : accent;
+    // Primary = solid accent + white. Secondary = white surface + defined
+    // border + dark text with an accent icon (not red-text-on-red-tint).
+    final fg = primary ? c.onAccent : c.textPrimary;
+    final iconColor = primary ? c.onAccent : c.accent;
     final box = Container(
       height: 44,
       padding: EdgeInsets.symmetric(horizontal: label == null ? 12 : 14),
       decoration: BoxDecoration(
-        color: primary ? c.accent : accent.withValues(alpha: 0.10),
+        color: primary ? c.accent : c.surface,
         borderRadius: BorderRadius.circular(AppRadii.chip),
-        border: primary
-            ? null
-            : Border.all(color: accent.withValues(alpha: 0.35), width: 0.5),
+        border: primary ? null : Border.all(color: c.borderStrong),
         boxShadow: primary
             ? [
                 BoxShadow(
@@ -464,7 +473,7 @@ class _QuickAction extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(icon, size: 16, color: fg),
+          Icon(icon, size: 16, color: iconColor),
           if (label != null) ...[
             const SizedBox(width: 6),
             Text(
@@ -481,9 +490,148 @@ class _QuickAction extends StatelessWidget {
         ],
       ),
     );
-    final child = onTap == null
+    return onTap == null
         ? box
         : PressScale(scale: 0.95, onTap: onTap!, child: box);
-    return tooltip == null ? child : Tooltip(message: tooltip!, child: child);
+  }
+}
+
+/// Integrated water control inside the fuel card: droplet · progress bar ·
+/// current/target litres · remove · +250. Replaces the old standalone water
+/// card so all of today's fuel status lives in one place.
+class _WaterInline extends StatelessWidget {
+  final int ml;
+  final int targetMl;
+  final Future<void> Function() onAdd;
+  final Future<void> Function() onRemove;
+  const _WaterInline({
+    required this.ml,
+    required this.targetMl,
+    required this.onAdd,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final target = targetMl <= 0 ? 3500 : targetMl;
+    final pct = (ml / target).clamp(0.0, 1.0);
+    final canRemove = ml > 0;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Label + value
+        Row(
+          children: [
+            Icon(LucideIcons.droplet, size: 16, color: c.waterColor),
+            const SizedBox(width: 8),
+            Text('Water',
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: c.textSecondary,
+                )),
+            const Spacer(),
+            Text.rich(
+              TextSpan(children: [
+                TextSpan(
+                  text: fmtLiters(ml),
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: c.textPrimary,
+                    letterSpacing: -0.3,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
+                ),
+                TextSpan(
+                  text: ' / ${fmtLiters(target)} L',
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: c.textMuted,
+                  ),
+                ),
+              ]),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        // Progress bar + controls
+        Row(
+          children: [
+            Expanded(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(99),
+                child: Stack(
+                  children: [
+                    Container(height: 8, color: c.surfaceElevated),
+                    FractionallySizedBox(
+                      widthFactor: pct,
+                      child: Container(height: 8, color: c.waterColor),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            // − (remove)
+            PressScale(
+              scale: 0.92,
+              onTap: () {
+                if (canRemove) onRemove();
+              },
+              child: Container(
+                width: 38,
+                height: 38,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: c.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: c.borderStrong),
+                ),
+                child: Icon(LucideIcons.minus,
+                    size: 17, color: canRemove ? c.textSecondary : c.textDim),
+              ),
+            ),
+            const SizedBox(width: 8),
+            // +250 ml (solid water-coloured for a clear primary water action)
+            PressScale(
+              scale: 0.95,
+              onTap: () => onAdd(),
+              child: Container(
+                height: 38,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: c.waterColor,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(LucideIcons.plus, size: 16, color: Colors.white),
+                    const SizedBox(width: 4),
+                    const Text(
+                      '250 ml',
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
   }
 }

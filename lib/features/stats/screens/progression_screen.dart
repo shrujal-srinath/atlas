@@ -16,6 +16,7 @@ import '../../achievements/achievement_provider.dart';
 import '../../habits/providers/habit_provider.dart';
 import '../../home/providers/home_providers.dart';
 import '../../home/scoring/score_engine.dart' show TaskContribution;
+import '../../home/scoring/section_def.dart';
 import '../../xp/leveling_engine.dart';
 import '../../xp/leveling_providers.dart';
 import '../../xp/models/level_prereq.dart';
@@ -74,6 +75,8 @@ class ProgressionScreen extends ConsumerWidget {
               milestonesMet: prereqProgress.where((p) => p.isMet).length,
               milestonesTotal: prereqProgress.length,
             ),
+            const SizedBox(height: 14),
+            _RankLadderLink(rank: rankFor(levelInfo.level)),
             const SizedBox(height: 22),
             _Section(
               label: 'NEXT-LEVEL MILESTONES',
@@ -113,6 +116,53 @@ class ProgressionScreen extends ConsumerWidget {
             const SizedBox(height: 8),
             _AchievementsGrid(unlocked: unlocked, progress: progressById),
             const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Entry point to the full Rookie → Legend ladder — keeps the ladder as a part
+/// of Progression (one rank hub) rather than a separate orphaned screen.
+class _RankLadderLink extends StatelessWidget {
+  final ({RankTier tier, RankSubTier subTier}) rank;
+  const _RankLadderLink({required this.rank});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return GestureDetector(
+      onTap: () => context.push('/stats/ranks'),
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: c.surface,
+          borderRadius: BorderRadius.circular(AppRadii.card),
+          border: Border.all(color: c.border, width: 0.5),
+        ),
+        child: Row(
+          children: [
+            Icon(LucideIcons.trophy, size: 18, color: c.amber),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Rank ladder',
+                      style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: c.textPrimary)),
+                  const SizedBox(height: 2),
+                  Text('All tiers · ${rank.tier.name} now',
+                      style: AppType.meta.copyWith(color: c.textMuted)),
+                ],
+              ),
+            ),
+            Icon(LucideIcons.chevronRight, size: 18, color: c.textDim),
           ],
         ),
       ),

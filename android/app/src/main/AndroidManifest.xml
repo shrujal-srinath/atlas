@@ -1,4 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Required for all Supabase/network calls. Declared explicitly in the main
+         manifest so release builds keep network access even if a plugin that
+         happens to contribute it (e.g. google_sign_in) is ever removed. The
+         debug/profile manifests also declare it for dev builds. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- User-grantable exact alarms; the app degrades to inexact alarms when

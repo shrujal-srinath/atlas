@@ -252,7 +252,7 @@ class _Chip extends StatelessWidget {
           child: Text(
             label,
             style: t.label.copyWith(
-              color: selected ? c.accent : c.textSecondary,
+              color: selected ? c.textPrimary : c.textSecondary,
               fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
             ),
           ),

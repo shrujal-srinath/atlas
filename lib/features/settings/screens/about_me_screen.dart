@@ -67,18 +67,9 @@ class _AboutBody extends ConsumerWidget {
           ),
           _Divider(),
           _Row(
-            label: 'Phase',
-            value: u?.currentPhase ?? '—',
-            onTap: () async {
-              final v = await showSelectSheet(context,
-                  title: 'Training phase',
-                  options: _phaseOptions,
-                  initial: u?.currentPhase);
-              if (v != null && v != u?.currentPhase) {
-                await patch({'current_phase': v});
-                await recordPhaseChange(ref, v);
-              }
-            },
+            label: 'Focus',
+            value: ref.watch(focusConfigProvider).summary,
+            onTap: () => FocusScreen.open(context),
           ),
         ]),
         const SizedBox(height: 22),
@@ -118,8 +109,12 @@ class _AboutBody extends ConsumerWidget {
                   suffix: 'kg',
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true));
-              if (v != null && v.isNotEmpty) {
-                await patch({'weight_kg': double.tryParse(v)});
+              final kg = v == null ? null : double.tryParse(v);
+              if (kg != null && kg > 0) {
+                // One weight everywhere: update the engine-driving profile
+                // weight AND today's history point on the Body-tab graph.
+                await patch({'weight_kg': kg});
+                await recordWeightHistoryPoint(ref, kg);
               }
             },
           ),
@@ -165,53 +160,137 @@ class _AboutBody extends ConsumerWidget {
         ]),
         const SizedBox(height: 22),
 
-        // ─── Daily targets ────────────────────────────────────
-        _SectionLabel('Daily targets'),
+        // ─── Nutrition goals ──────────────────────────────────
+        // Single engine-driven editor. Targets are computed from your goal +
+        // body + activity, not typed in raw — so they always tell one story.
+        _SectionLabel('Nutrition goals'),
         const SizedBox(height: 8),
+        _NutritionGoalsTile(
+          user: u,
+          targets: ref.watch(dailyTargetsProvider),
+        ),
+        const SizedBox(height: 10),
         _Card(children: [
-          _NumRow(
-            label: 'Calories',
-            unit: 'kcal',
-            value: u?.dailyCalorieTarget,
-            onSaved: (v) => patch({'daily_calorie_target': v}),
-          ),
-          _Divider(),
-          _NumRow(
-            label: 'Protein',
-            unit: 'g',
-            value: u?.dailyProteinTarget,
-            onSaved: (v) => patch({'daily_protein_target': v}),
-          ),
-          _Divider(),
-          _NumRow(
-            label: 'Carbs',
-            unit: 'g',
-            value: u?.dailyCarbsTarget,
-            onSaved: (v) => patch({'daily_carbs_target': v}),
-          ),
-          _Divider(),
-          _NumRow(
-            label: 'Fat',
-            unit: 'g',
-            value: u?.dailyFatTarget,
-            onSaved: (v) => patch({'daily_fat_target': v}),
-          ),
-          _Divider(),
-          _NumRow(
-            label: 'Fiber',
-            unit: 'g',
-            value: u?.dailyFiberTarget,
-            onSaved: (v) => patch({'daily_fiber_target': v}),
-          ),
-          _Divider(),
-          _NumRow(
-            label: 'Water',
-            unit: 'ml',
-            value: u?.waterTargetMl,
-            onSaved: (v) => patch({'water_target_ml': v}),
+          _Row(
+            label: 'Meals',
+            value: '${ref.watch(mealPlanProvider).enabledMeals.length} meals',
+            onTap: () => MealsScreen.open(context),
           ),
         ]),
       ],
+    );
+  }
+}
+
+/// Live nutrition-goal summary (engine-computed) that opens the full goal
+/// editor. Replaces the old raw per-macro number rows, which let you type
+/// values that contradicted the recommendation engine.
+class _NutritionGoalsTile extends StatelessWidget {
+  final AppUser? user;
+  final DailyTargets targets;
+  const _NutritionGoalsTile({required this.user, required this.targets});
+
+  String get _goalLine {
+    final goal = user?.bodyWeightGoal ?? 'maintain';
+    final tw = user?.targetBodyWeight;
+    return switch (goal) {
+      'gain' =>
+        tw != null ? 'Gaining to ${tw.toStringAsFixed(0)} kg' : 'Gaining mass',
+      'lose' =>
+        tw != null ? 'Leaning to ${tw.toStringAsFixed(0)} kg' : 'Leaning down',
+      _ => 'Maintaining weight',
+    };
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final t = context.t;
+    final waterL = (user?.waterTargetMl ?? 0) / 1000;
+    return PressScale(
+      scale: 0.985,
+      onTap: () {
+        HapticFeedback.selectionClick();
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const GoalSettingsHub()),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 14, 14, 16),
+        decoration: BoxDecoration(
+          color: c.surface,
+          borderRadius: BorderRadius.circular(AppRadii.card),
+          border: Border.all(color: c.border, width: 0.5),
+          boxShadow: AppShadows.card,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(_goalLine, style: t.bodyStrong),
+                      const SizedBox(height: 2),
+                      Text('Tap to adjust goal, pace, macros & calories',
+                          style: t.meta.copyWith(color: c.textMuted)),
+                    ],
+                  ),
+                ),
+                Icon(LucideIcons.chevronRight, size: 16, color: c.textMuted),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Divider(height: 1, color: c.border),
+            const SizedBox(height: 14),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Text('${targets.kcal.round()}', style: t.numLg),
+                const SizedBox(width: 5),
+                Text('kcal / day',
+                    style: t.bodyStrong.copyWith(color: c.textMuted)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                _GoalMacro(label: 'Protein', value: '${targets.proteinG.round()}g'),
+                _GoalMacro(label: 'Carbs', value: '${targets.carbsG.round()}g'),
+                _GoalMacro(label: 'Fat', value: '${targets.fatG.round()}g'),
+                _GoalMacro(
+                    label: 'Water', value: '${waterL.toStringAsFixed(1)}L'),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GoalMacro extends StatelessWidget {
+  final String label;
+  final String value;
+  const _GoalMacro({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final t = context.t;
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(value, style: t.bodyStrong.copyWith(color: c.textPrimary)),
+          const SizedBox(height: 2),
+          Text(label.toUpperCase(),
+              style: t.meta.copyWith(color: c.textMuted, letterSpacing: 0.4)),
+        ],
+      ),
     );
   }
 }

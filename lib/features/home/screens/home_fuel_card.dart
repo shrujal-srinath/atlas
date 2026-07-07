@@ -319,18 +319,11 @@ class _FuelWaterRow extends ConsumerWidget {
   final int waterTargetMl;
   const _FuelWaterRow({required this.waterMl, required this.waterTargetMl});
 
-  String _fmtLiters(int ml) {
-    final l = ml / 1000.0;
-    if ((l * 10).round() == (l.round() * 10)) return l.toStringAsFixed(1);
-    return l.toStringAsFixed(1);
-  }
+  String _fmtLiters(int ml) => fmtLiters(ml); // accurate, no misleading rounding
 
   Future<void> _addWater(WidgetRef ref, int ml) async {
     HapticFeedback.selectionClick();
-    final repo = ref.read(foodRepositoryProvider);
-    final date = ref.read(diaryDateProvider);
-    await repo.addWater(ml, date);
-    ref.invalidate(waterIntakeProvider);
+    await addWaterIntake(ref, ml); // one path: handles dev-mode + refresh
   }
 
   Future<void> _promptCustom(BuildContext context, WidgetRef ref) async {
@@ -412,44 +405,64 @@ class _FuelWaterRow extends ConsumerWidget {
   }
 }
 
-/// Pill button for `+250 ml`. Uses GestureDetector with `opaque` hit-test so
-/// the parent card's onTap (route to /food) is not also triggered.
-class _WaterAddBtn extends StatelessWidget {
+/// Pill button for `+250 ml` (tap) / custom volume (long-press). Opaque
+/// hit-test so the parent card's onTap (route to /food) isn't also triggered.
+/// Press-scales + deepens on touch so a high-frequency action feels tactile.
+class _WaterAddBtn extends StatefulWidget {
   final VoidCallback onTap;
   final VoidCallback onLongPress;
   const _WaterAddBtn({required this.onTap, required this.onLongPress});
+
+  @override
+  State<_WaterAddBtn> createState() => _WaterAddBtnState();
+}
+
+class _WaterAddBtnState extends State<_WaterAddBtn> {
+  bool _down = false;
+  void _set(bool v) {
+    if (v != _down) setState(() => _down = v);
+  }
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      onLongPress: onLongPress,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-        decoration: BoxDecoration(
-          color: c.mind.withValues(alpha: 0.13),
-          borderRadius: BorderRadius.circular(99),
-          border: Border.all(
-              color: c.mind.withValues(alpha: 0.35), width: 0.5),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(LucideIcons.plus, size: 11, color: c.mind),
-            const SizedBox(width: 4),
-            Text(
-              '250 ml',
-              style: TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: c.mind,
-                height: 1.0,
+      onTapDown: (_) => _set(true),
+      onTapCancel: () => _set(false),
+      onTapUp: (_) => _set(false),
+      onTap: widget.onTap,
+      onLongPress: widget.onLongPress,
+      child: AnimatedScale(
+        scale: _down ? 0.93 : 1.0,
+        duration: const Duration(milliseconds: 110),
+        curve: Curves.easeOut,
+        child: Container(
+          // Larger tap target (≈34px tall) for a frequently-used control.
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+          decoration: BoxDecoration(
+            color: c.mind.withValues(alpha: _down ? 0.24 : 0.15),
+            borderRadius: BorderRadius.circular(99),
+            border: Border.all(
+                color: c.mind.withValues(alpha: 0.40), width: 1),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(LucideIcons.plus, size: 13, color: c.mind),
+              const SizedBox(width: 5),
+              Text(
+                '250 ml',
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: c.mind,
+                  height: 1.0,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

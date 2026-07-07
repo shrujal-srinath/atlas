@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -30,17 +32,39 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   bool _loading = false;
   bool _obscure = true;
 
+  // Resend cooldown — prevents spamming the email-code endpoint with no
+  // feedback about why nothing seems to happen.
+  static const _resendCooldown = Duration(seconds: 30);
+  Timer? _cooldownTicker;
+  int _cooldownSecs = 0;
+
   @override
   void dispose() {
     _emailCtrl.dispose();
     _codeCtrl.dispose();
     _passwordCtrl.dispose();
+    _cooldownTicker?.cancel();
     super.dispose();
+  }
+
+  void _startCooldown() {
+    _cooldownTicker?.cancel();
+    setState(() => _cooldownSecs = _resendCooldown.inSeconds);
+    _cooldownTicker = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) return;
+      if (_cooldownSecs <= 1) {
+        t.cancel();
+        setState(() => _cooldownSecs = 0);
+      } else {
+        setState(() => _cooldownSecs -= 1);
+      }
+    });
   }
 
   String get _email => _emailCtrl.text.trim();
 
   Future<void> _sendCode() async {
+    if (_cooldownSecs > 0) return;
     if (!isValidEmail(_email)) {
       return showSnack(context, 'Enter a valid email address.', isError: true);
     }
@@ -50,6 +74,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
       if (!mounted) return;
       HapticFeedback.lightImpact();
       setState(() => _phase = 1);
+      _startCooldown();
       showSnack(context, 'We emailed a 6-digit code to $_email.');
     } catch (e) {
       if (mounted) showErrorSnack(context, e);
@@ -204,9 +229,18 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
         ),
         const SizedBox(height: 10),
         GestureDetector(
-          onTap: _loading ? null : _sendCode,
+          onTap: (_loading || _cooldownSecs > 0) ? null : _sendCode,
           behavior: HitTestBehavior.opaque,
-          child: const Text('Resend code', style: AuthType.link),
+          child: Text(
+            _cooldownSecs > 0
+                ? 'Resend code (${_cooldownSecs}s)'
+                : 'Resend code',
+            style: AuthType.link.copyWith(
+              color: _cooldownSecs > 0
+                  ? AuthColors.inkSecondary
+                  : AuthColors.accent,
+            ),
+          ),
         ),
       ],
     );

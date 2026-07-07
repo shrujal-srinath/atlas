@@ -128,11 +128,7 @@ class _Card extends StatelessWidget {
       child: child,
     );
     if (onTap == null) return card;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadii.card),
-      child: card,
-    );
+    return PressableScale(onTap: onTap!, child: card);
   }
 }
 

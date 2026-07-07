@@ -2,8 +2,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:atlas/core/utils/task_stats.dart';
 import 'package:atlas/shared/models/models.dart';
 
-// Fixed "today" so windows are deterministic. (The environment date is also
-// 2026-06-22, which keeps calculateStreak — which reads the real now — aligned.)
+// Fixed "today" so windows AND streaks are fully deterministic — `now` is
+// threaded all the way through computeTaskStats → calculateStreak, so this no
+// longer depends on the real environment date.
 final _now = DateTime(2026, 6, 22);
 
 String _ds(DateTime d) =>
@@ -14,13 +15,14 @@ Habit _hab({
   GoalType? goalType,
   double? goalValue,
   bool effort = false,
+  DateTime? createdAt,
 }) =>
     Habit(
       id: 'h',
       userId: 'u',
       name: 'Gym',
       icon: 'dumbbell',
-      section: HabitSection.athletic,
+      sectionId: 'athletic',
       type: HabitType.positive,
       daysOfWeek: days,
       goalType: goalType,
@@ -28,6 +30,7 @@ Habit _hab({
       effortRatingEnabled: effort,
       noteEnabled: false,
       isArchived: false,
+      createdAt: createdAt,
     );
 
 HabitLog _log(
@@ -60,6 +63,23 @@ void main() {
       expect(s.currentStreak, greaterThanOrEqualTo(29));
       expect(s.rateTrend.length, 5); // month → 5 weekly buckets
       expect(s.rateTrend.every((b) => b.rate == 1.0), isTrue);
+    });
+
+    test('days before the habit existed are not counted as scheduled', () {
+      // Created 4 days before "today" → it existed for 5 days incl. today.
+      final created = _now.subtract(const Duration(days: 4));
+      final logs = [for (int i = 0; i <= 4; i++) _log(_now.subtract(Duration(days: i)))];
+      final s = computeTaskStats(
+        habit: _hab(createdAt: created),
+        logs: logs,
+        range: StatRange.month, // 30-day window
+        now: _now,
+      );
+      // Only the 5 days from creation → today count — NOT the full 30-day window,
+      // so a brand-new habit reads 100%, not 5/30.
+      expect(s.scheduledCount, 5);
+      expect(s.completedCount, 5);
+      expect(s.completionRate, 1.0);
     });
 
     test('a miss lowers the rate', () {

@@ -8,9 +8,10 @@ import '../../../core/theme/app_icons.dart';
 import '../../../core/utils/error_messages.dart';
 import '../../../core/utils/task_stats.dart';
 import '../../../shared/models/models.dart';
+import '../../home/scoring/section_def.dart';
 import '../../../shared/widgets/atlas_back_button.dart';
 import '../providers/habit_provider.dart';
-import '../widgets/habit_month_heatmap.dart';
+import '../widgets/habit_contribution_grid.dart';
 
 /// Deep per-task analytics: streaks, completion-rate trend, performance
 /// progression, day-of-week & effort patterns, and a month heatmap — switchable
@@ -57,20 +58,26 @@ class _HabitStatsScreenState extends ConsumerState<HabitStatsScreen> {
           final stats =
               computeTaskStats(habit: habit, logs: logs, range: _range);
           final goalBearing = habit.goalType != null;
+          final totalCompletions = logs.where((l) => l.completed).length;
+          final week = _currentWeekMarks(logs);
 
           return ListView(
             padding: const EdgeInsets.fromLTRB(
-                AppSpace.screenH, 12, AppSpace.screenH, 40),
+                AppSpace.screenH, 14, AppSpace.screenH, 40),
             children: [
-              _Header(habit: habit, accent: accent),
+              _StatHero(
+                habit: habit,
+                accent: accent,
+                stats: stats,
+                totalCompletions: totalCompletions,
+                week: week,
+              ),
               const SizedBox(height: 16),
               _RangeToggle(
                 value: _range,
                 accent: accent,
                 onChanged: (r) => setState(() => _range = r),
               ),
-              const SizedBox(height: 16),
-              _KpiRow(stats: stats, accent: accent),
               const SizedBox(height: 14),
               _ChartCard(
                 title: 'COMPLETION RATE',
@@ -97,7 +104,12 @@ class _HabitStatsScreenState extends ConsumerState<HabitStatsScreen> {
                 ),
               ],
               const SizedBox(height: 14),
-              HabitMonthHeatmap(habit: habit, logs: logs, accent: accent),
+              _ChartCard(
+                title: 'CONSISTENCY',
+                subtitle: 'Last 4 months',
+                child: HabitContributionGrid(
+                    habit: habit, logs: logs, accent: accent),
+              ),
             ],
           );
         },
@@ -109,7 +121,7 @@ class _HabitStatsScreenState extends ConsumerState<HabitStatsScreen> {
     if (habit.colorKey != null && kHabitColorSwatch[habit.colorKey] != null) {
       return Color(kHabitColorSwatch[habit.colorKey]!);
     }
-    return habit.section.color(context.c);
+    return habit.sectionId.sectionColor(context.c);
   }
 
   String _goalLabel(Habit habit) {
@@ -123,45 +135,301 @@ class _HabitStatsScreenState extends ConsumerState<HabitStatsScreen> {
     final g = habit.goalValue;
     return g == null ? unit : 'Goal · ${g.toStringAsFixed(0)} $unit';
   }
+
+  /// Completion status for each day of the current week (Mon→Sun).
+  List<_DayMark> _currentWeekMarks(List<HabitLog> logs) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final monday = today.subtract(Duration(days: now.weekday - 1));
+    final done = <String>{for (final l in logs) if (l.completed) l.date};
+    String ymd(DateTime d) =>
+        '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+    return [
+      for (var i = 0; i < 7; i++)
+        () {
+          final d = monday.add(Duration(days: i));
+          if (d.isAfter(today)) return _DayMark.future;
+          return done.contains(ymd(d)) ? _DayMark.done : _DayMark.missed;
+        }(),
+    ];
+  }
 }
+
+enum _DayMark { done, missed, future }
 
 // ── Header ─────────────────────────────────────────────────────────────
 
-class _Header extends StatelessWidget {
+/// The hero: a completion ring with the habit icon + streak flame, the three
+/// headline stats (Best · All-time % · Completions), and the current-week rings.
+class _StatHero extends StatelessWidget {
   final Habit habit;
   final Color accent;
-  const _Header({required this.habit, required this.accent});
+  final TaskStats stats;
+  final int totalCompletions;
+  final List<_DayMark> week;
+  const _StatHero({
+    required this.habit,
+    required this.accent,
+    required this.stats,
+    required this.totalCompletions,
+    required this.week,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final c = context.c;
     final t = context.t;
-    return Row(
-      children: [
-        Container(
-          width: 48,
-          height: 48,
-          decoration: BoxDecoration(
-            color: accent.withValues(alpha: 0.14),
-            borderRadius: BorderRadius.circular(AppRadii.card),
-          ),
-          child: Icon(habitIcon(habit.icon), size: 22, color: accent),
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return Container(
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        border: Border.all(color: c.border, width: 0.5),
+        boxShadow: AppShadows.card,
+      ),
+      child: Column(
+        children: [
+          Row(
             children: [
-              Text(habit.name, style: t.h2, maxLines: 1, overflow: TextOverflow.ellipsis),
-              const SizedBox(height: 2),
-              Text(
-                habit.section.name[0].toUpperCase() + habit.section.name.substring(1),
-                style: t.meta,
+              _HeroRing(
+                progress: stats.completionRate.clamp(0, 1).toDouble(),
+                accent: accent,
+                icon: habitIcon(habit.icon),
+                streak: stats.currentStreak,
+              ),
+              const SizedBox(width: 18),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(habit.name,
+                        style: t.h2, maxLines: 2, overflow: TextOverflow.ellipsis),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Icon(LucideIcons.flame, size: 14, color: c.amber),
+                        const SizedBox(width: 5),
+                        Text(
+                          stats.currentStreak > 0
+                              ? '${stats.currentStreak}-day streak'
+                              : habit.sectionId.sectionName,
+                          style: t.meta.copyWith(
+                              color: c.textSecondary,
+                              fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
-        ),
+          const SizedBox(height: 18),
+          Divider(height: 1, color: c.border),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              _HeroStat(
+                  value: '${stats.bestStreak}', label: 'BEST STREAK'),
+              _HeroDivider(),
+              _HeroStat(
+                  value: '${(stats.completionRate * 100).round()}%',
+                  label: 'ALL-TIME'),
+              _HeroDivider(),
+              _HeroStat(
+                  value: '$totalCompletions', label: 'COMPLETIONS'),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _WeekRings(week: week, accent: accent),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroRing extends StatelessWidget {
+  final double progress; // 0..1
+  final Color accent;
+  final IconData icon;
+  final int streak;
+  const _HeroRing({
+    required this.progress,
+    required this.accent,
+    required this.icon,
+    required this.streak,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return SizedBox(
+      width: 84,
+      height: 84,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          TweenAnimationBuilder<double>(
+            tween: Tween(begin: 0, end: progress),
+            duration: const Duration(milliseconds: 700),
+            curve: Curves.easeOutCubic,
+            builder: (_, v, _) => CustomPaint(
+              size: const Size(84, 84),
+              painter: _RingPainter(
+                  progress: v, color: accent, track: c.border),
+            ),
+          ),
+          Container(
+            width: 50,
+            height: 50,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: 0.12),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, size: 24, color: accent),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RingPainter extends CustomPainter {
+  final double progress;
+  final Color color;
+  final Color track;
+  const _RingPainter(
+      {required this.progress, required this.color, required this.track});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const stroke = 8.0;
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = (size.width - stroke) / 2;
+    final base = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round
+      ..color = track;
+    canvas.drawCircle(center, radius, base);
+    if (progress <= 0) return;
+    final arc = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round
+      ..color = color;
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      -1.5708, // start at top (-90°)
+      6.2832 * progress,
+      false,
+      arc,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_RingPainter old) =>
+      old.progress != progress || old.color != color;
+}
+
+class _HeroStat extends StatelessWidget {
+  final String value;
+  final String label;
+  const _HeroStat({required this.value, required this.label});
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final t = context.t;
+    return Expanded(
+      child: Column(
+        children: [
+          Text(value,
+              style: const TextStyle(
+                  fontFamily: 'SpaceGrotesk',
+                  fontSize: 24,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 3),
+          Text(label,
+              style: t.label.copyWith(
+                  fontSize: 9.5, color: c.textMuted, letterSpacing: 0.6),
+              textAlign: TextAlign.center),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroDivider extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) =>
+      Container(width: 0.5, height: 30, color: context.c.border);
+}
+
+/// The current week as Mon→Sun day rings, filled when completed.
+class _WeekRings extends StatelessWidget {
+  final List<_DayMark> week;
+  final Color accent;
+  const _WeekRings({required this.week, required this.accent});
+
+  static const _labels = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final t = context.t;
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        for (var i = 0; i < 7; i++)
+          Column(
+            children: [
+              _DayRing(mark: week[i], accent: accent),
+              const SizedBox(height: 5),
+              Text(_labels[i],
+                  style: t.meta.copyWith(
+                      color: c.textMuted, fontWeight: FontWeight.w600)),
+            ],
+          ),
       ],
     );
+  }
+}
+
+class _DayRing extends StatelessWidget {
+  final _DayMark mark;
+  final Color accent;
+  const _DayRing({required this.mark, required this.accent});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return switch (mark) {
+      _DayMark.done => Container(
+          width: 30,
+          height: 30,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(color: accent, shape: BoxShape.circle),
+          child: Icon(LucideIcons.check, size: 16, color: c.onAccent),
+        ),
+      _DayMark.missed => Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(color: c.border, width: 2),
+          ),
+        ),
+      _DayMark.future => Container(
+          width: 30,
+          height: 30,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+                color: c.border.withValues(alpha: 0.5), width: 1.5),
+          ),
+        ),
+    };
   }
 }
 
@@ -229,103 +497,6 @@ class _RangeToggle extends StatelessWidget {
                 ),
               ),
             ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── KPI tiles ──────────────────────────────────────────────────────────
-
-class _KpiRow extends StatelessWidget {
-  final TaskStats stats;
-  final Color accent;
-  const _KpiRow({required this.stats, required this.accent});
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    return Row(
-      children: [
-        Expanded(
-          child: _KpiTile(
-            label: 'CURRENT',
-            value: '${stats.currentStreak}',
-            suffix: 'days',
-            icon: LucideIcons.flame,
-            color: c.amber,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _KpiTile(
-            label: 'BEST',
-            value: '${stats.bestStreak}',
-            suffix: 'days',
-            icon: LucideIcons.trophy,
-            color: accent,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _KpiTile(
-            label: 'RATE',
-            value: '${(stats.completionRate * 100).round()}',
-            suffix: '%',
-            icon: LucideIcons.activity,
-            color: c.positive,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _KpiTile extends StatelessWidget {
-  final String label;
-  final String value;
-  final String suffix;
-  final IconData icon;
-  final Color color;
-  const _KpiTile({
-    required this.label,
-    required this.value,
-    required this.suffix,
-    required this.icon,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    final t = context.t;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: c.surface,
-        borderRadius: BorderRadius.circular(AppRadii.card),
-        border: Border.all(color: c.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(height: 8),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(value,
-                  style: const TextStyle(
-                      fontFamily: 'SpaceGrotesk',
-                      fontSize: 22,
-                      fontWeight: FontWeight.w600)),
-              const SizedBox(width: 3),
-              Text(suffix, style: t.meta.copyWith(fontSize: 11)),
-            ],
-          ),
-          const SizedBox(height: 2),
-          Text(label, style: t.label.copyWith(fontSize: 10)),
         ],
       ),
     );
@@ -453,6 +624,8 @@ class _RateTrendChart extends StatelessWidget {
           barTouchData: BarTouchData(
             touchTooltipData: BarTouchTooltipData(
               getTooltipColor: (_) => c.surfaceElevated,
+              fitInsideHorizontally: true,
+              fitInsideVertically: true,
               getTooltipItem: (group, _, rod, _) => BarTooltipItem(
                 '${(rod.toY * 100).round()}%',
                 TextStyle(
@@ -520,6 +693,7 @@ class _PerformanceChart extends StatelessWidget {
           maxY: maxY <= 0 ? 1 : maxY,
           minX: 0,
           maxX: (pts.length - 1).toDouble(),
+          clipData: const FlClipData.all(),
           gridData: FlGridData(
             show: true,
             drawVerticalLine: false,
@@ -568,12 +742,42 @@ class _PerformanceChart extends StatelessWidget {
                     color: c.positive.withValues(alpha: 0.7),
                     strokeWidth: 1.5,
                     dashArray: [5, 4],
+                    label: HorizontalLineLabel(
+                      show: true,
+                      alignment: Alignment.topRight,
+                      padding: const EdgeInsets.only(right: 2, bottom: 2),
+                      style: TextStyle(
+                          fontFamily: 'SpaceGrotesk',
+                          fontSize: 9,
+                          fontWeight: FontWeight.w600,
+                          color: c.positive),
+                      labelResolver: (_) => 'Goal',
+                    ),
                   ),
                 ])
               : const ExtraLinesData(),
           lineTouchData: LineTouchData(
+            getTouchedSpotIndicator: (barData, indexes) => [
+              for (final _ in indexes)
+                TouchedSpotIndicatorData(
+                  FlLine(
+                    color: (barData.color ?? c.accent).withValues(alpha: 0.30),
+                    strokeWidth: 1.5,
+                  ),
+                  FlDotData(
+                    getDotPainter: (s, p, b, i) => FlDotCirclePainter(
+                      radius: 3.5,
+                      color: b.color ?? c.accent,
+                      strokeWidth: 2,
+                      strokeColor: c.surface,
+                    ),
+                  ),
+                ),
+            ],
             touchTooltipData: LineTouchTooltipData(
               getTooltipColor: (_) => c.surfaceElevated,
+              fitInsideHorizontally: true,
+              fitInsideVertically: true,
               getTooltipItems: (spots) => spots
                   .map((s) => LineTooltipItem(
                         s.y.toStringAsFixed(s.y == s.y.roundToDouble() ? 0 : 1),
@@ -594,6 +798,7 @@ class _PerformanceChart extends StatelessWidget {
               ],
               isCurved: true,
               curveSmoothness: 0.25,
+              preventCurveOverShooting: true,
               color: accent,
               barWidth: 2.5,
               dotData: FlDotData(
@@ -669,6 +874,8 @@ class _WeekdayChart extends StatelessWidget {
           barTouchData: BarTouchData(
             touchTooltipData: BarTouchTooltipData(
               getTooltipColor: (_) => c.surfaceElevated,
+              fitInsideHorizontally: true,
+              fitInsideVertically: true,
               getTooltipItem: (group, _, rod, _) {
                 final stat = w[group.x];
                 return BarTooltipItem(
@@ -731,6 +938,7 @@ class _EffortChart extends StatelessWidget {
           maxY: 5,
           minX: 0,
           maxX: (pts.length - 1).toDouble(),
+          clipData: const FlClipData.all(),
           gridData: FlGridData(
             show: true,
             drawVerticalLine: false,
@@ -757,8 +965,27 @@ class _EffortChart extends StatelessWidget {
             bottomTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
           ),
           lineTouchData: LineTouchData(
+            getTouchedSpotIndicator: (barData, indexes) => [
+              for (final _ in indexes)
+                TouchedSpotIndicatorData(
+                  FlLine(
+                    color: (barData.color ?? c.accent).withValues(alpha: 0.30),
+                    strokeWidth: 1.5,
+                  ),
+                  FlDotData(
+                    getDotPainter: (s, p, b, i) => FlDotCirclePainter(
+                      radius: 3.5,
+                      color: b.color ?? c.accent,
+                      strokeWidth: 2,
+                      strokeColor: c.surface,
+                    ),
+                  ),
+                ),
+            ],
             touchTooltipData: LineTouchTooltipData(
               getTooltipColor: (_) => c.surfaceElevated,
+              fitInsideHorizontally: true,
+              fitInsideVertically: true,
               getTooltipItems: (spots) => spots
                   .map((s) => LineTooltipItem(
                         s.y.toStringAsFixed(s.y == s.y.roundToDouble() ? 0 : 1),
@@ -779,6 +1006,7 @@ class _EffortChart extends StatelessWidget {
               ],
               isCurved: true,
               curveSmoothness: 0.25,
+              preventCurveOverShooting: true,
               color: c.amber,
               barWidth: 2.5,
               dotData: FlDotData(

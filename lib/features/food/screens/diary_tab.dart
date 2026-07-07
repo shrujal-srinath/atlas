@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/models.dart';
 import '../data/meal_bundle_repository.dart';
@@ -18,7 +16,7 @@ import '../../../shared/widgets/atlas_error.dart';
 import '../../../shared/widgets/atlas_skeleton.dart';
 import 'edit_entry_sheet.dart';
 import 'food_search_sheet.dart';
-import 'goal_setting_screen.dart';
+import 'goal_settings_hub.dart';
 import 'meal_picker_sheet.dart';
 import 'micros_sheet.dart';
 import 'quick_add_sheet.dart';
@@ -34,8 +32,6 @@ class DiaryTab extends ConsumerWidget {
     final c = context.c;
     final date = ref.watch(diaryDateProvider);
     final entriesAsync = ref.watch(diaryEntriesProvider);
-    final waterAsync = ref.watch(waterIntakeProvider);
-    final waterTarget = ref.watch(waterTargetProvider);
 
     return Scaffold(
       backgroundColor: c.background,
@@ -77,14 +73,21 @@ class DiaryTab extends ConsumerWidget {
                             ref.read(dailyTargetsProvider)),
                         onGoalTap: () => Navigator.of(context).push(
                           MaterialPageRoute(
-                              builder: (_) => const GoalSettingScreen()),
+                              builder: (_) => const GoalSettingsHub()),
                         ),
                         onAddMeal: () => _openMealPicker(context, ref, date),
                         onQuickAdd: () => _openQuickAdd(context, ref, date),
                       ),
                       const SizedBox(height: 14),
-                      // Meal list — the hero of the diary.
-                      for (final slot in kDiarySlotOrder) ...[
+                      // Meal list — the hero of the diary. Show the meals on the
+                      // user's schedule, plus any off-schedule slot that already
+                      // has logged entries so nothing logged is ever hidden.
+                      for (final slot in kDiarySlotOrder)
+                        if (ref
+                                .watch(mealPlanProvider)
+                                .forSlot(slot)
+                                .enabled ||
+                            bySlot[slot]!.isNotEmpty) ...[
                         MealSection(
                           slot: slot,
                           date: date,
@@ -105,22 +108,6 @@ class DiaryTab extends ConsumerWidget {
                         ),
                         const SizedBox(height: 10),
                       ],
-                      const SizedBox(height: 4),
-                      _WaterCard(
-                        ml: waterAsync.valueOrNull ?? 0,
-                        targetMl: waterTarget,
-                        onAdd: () async {
-                          final repo = ref.read(foodRepositoryProvider);
-                          await repo.addWater(250, date);
-                          ref.invalidate(waterIntakeProvider);
-                          HapticFeedback.lightImpact();
-                        },
-                        onRemove: () async {
-                          final repo = ref.read(foodRepositoryProvider);
-                          await repo.removeLastWater(date);
-                          ref.invalidate(waterIntakeProvider);
-                        },
-                      ),
                     ],
                   );
                 },
@@ -130,9 +117,7 @@ class DiaryTab extends ConsumerWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: const [
-                      AtlasSkeleton.card(cardHeight: 220),
-                      SizedBox(height: 12),
-                      AtlasSkeleton.card(cardHeight: 90),
+                      AtlasSkeleton.card(cardHeight: 300),
                       SizedBox(height: 16),
                       AtlasSkeleton.listRow(rows: 4),
                     ],
@@ -320,121 +305,6 @@ class DiaryTab extends ConsumerWidget {
       backgroundColor: Colors.transparent,
       useSafeArea: true,
       builder: (_) => SavedMealsSheet(slot: slot, date: date),
-    );
-  }
-}
-
-// ── Water tracker ───────────────────────────────────────────────
-
-class _WaterCard extends StatelessWidget {
-  final int ml;
-  final int targetMl;
-  final VoidCallback onAdd;
-  final VoidCallback onRemove;
-
-  const _WaterCard({
-    required this.ml,
-    required this.targetMl,
-    required this.onAdd,
-    required this.onRemove,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final c = context.c;
-    final glasses = (ml / 250).ceil();
-    final targetGlasses = (targetMl / 250).ceil();
-    final pct = targetMl <= 0 ? 0.0 : (ml / targetMl).clamp(0.0, 1.0);
-
-    return Container(
-      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
-      decoration: BoxDecoration(
-        color: c.surface,
-        borderRadius: BorderRadius.circular(AppRadii.card),
-        border: Border.all(color: c.border, width: 0.5),
-        boxShadow: AppShadows.card,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(LucideIcons.droplets, size: 16, color: c.athletic),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text('WATER',
-                    style: AppType.overline.copyWith(color: c.textMuted)),
-              ),
-              Text(
-                '${(ml / 1000).toStringAsFixed(1)} / ${(targetMl / 1000).toStringAsFixed(1)} L',
-                style: AppType.numMd.copyWith(color: c.textPrimary),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(99),
-            child: Stack(
-              children: [
-                Container(height: 6, color: c.surfaceElevated),
-                FractionallySizedBox(
-                  widthFactor: pct,
-                  child: Container(height: 6, color: c.athletic),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: Wrap(
-                  spacing: 4,
-                  runSpacing: 4,
-                  children: List.generate(
-                    targetGlasses.clamp(0, 14),
-                    (i) => Icon(
-                      LucideIcons.glassWater,
-                      size: 16,
-                      color: i < glasses ? c.athletic : c.textDim,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              InkWell(
-                onTap: ml > 0 ? onRemove : null,
-                borderRadius: BorderRadius.circular(AppRadii.chip),
-                child: Container(
-                  width: 32, height: 32,
-                  decoration: BoxDecoration(
-                    color: c.surfaceElevated,
-                    borderRadius: BorderRadius.circular(AppRadii.chip),
-                    border: Border.all(color: c.border),
-                  ),
-                  child: Icon(LucideIcons.minus,
-                      size: 14,
-                      color: ml > 0 ? c.textSecondary : c.textDim),
-                ),
-              ),
-              const SizedBox(width: 6),
-              InkWell(
-                onTap: onAdd,
-                borderRadius: BorderRadius.circular(AppRadii.chip),
-                child: Container(
-                  width: 32, height: 32,
-                  decoration: BoxDecoration(
-                    color: c.accentSoft,
-                    borderRadius: BorderRadius.circular(AppRadii.chip),
-                    border: Border.all(color: c.athletic),
-                  ),
-                  child: Icon(LucideIcons.plus, size: 14, color: c.athletic),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
     );
   }
 }

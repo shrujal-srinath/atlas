@@ -107,7 +107,10 @@ class _BentoFieldState extends State<_BentoField> {
     final c = context.c;
     final focused = _focus.hasFocus;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+      // Horizontal inset only; the vertical inset comes solely from the
+      // field's contentPadding so the interior whitespace is uniform on all
+      // four sides (was double-padded + uncentred before).
+      padding: const EdgeInsets.symmetric(horizontal: 14),
       decoration: BoxDecoration(
         color: c.surfaceElevated,
         borderRadius: BorderRadius.circular(AppRadii.chip),
@@ -121,6 +124,7 @@ class _BentoFieldState extends State<_BentoField> {
         focusNode: _focus,
         autofocus: widget.autofocus,
         keyboardType: widget.keyboard,
+        textAlignVertical: TextAlignVertical.center,
         style: TextStyle(
           fontFamily: 'Inter',
           fontSize: 14,
@@ -128,9 +132,9 @@ class _BentoFieldState extends State<_BentoField> {
           color: c.textPrimary,
         ),
         decoration: InputDecoration(
-          isCollapsed: false,
+          isCollapsed: true,
           isDense: true,
-          contentPadding: const EdgeInsets.symmetric(vertical: 14),
+          contentPadding: const EdgeInsets.symmetric(vertical: 15),
           border: InputBorder.none,
           enabledBorder: InputBorder.none,
           focusedBorder: InputBorder.none,
@@ -161,22 +165,68 @@ class _Label extends StatelessWidget {
   Widget build(BuildContext context) => Text(text, style: context.t.label);
 }
 
-class _SectionRow extends StatelessWidget {
-  final HabitSection selected;
-  final ValueChanged<HabitSection> onChanged;
-  const _SectionRow({required this.selected, required this.onChanged});
+/// Section picker — chips for every section in the registry (3 built-ins +
+/// custom), so a habit can be assigned to any of them. Selected = solid accent.
+class _SectionRow extends ConsumerWidget {
+  final String selectedId;
+  final ValueChanged<String> onChanged;
+  const _SectionRow({required this.selectedId, required this.onChanged});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final c = context.c;
-    return _Segmented(
-      index: selected.index,
-      height: 44,
-      colorFor: (i) => HabitSection.values[i].color(c),
-      onChanged: (i) => onChanged(HabitSection.values[i]),
-      items: [
-        for (final s in HabitSection.values)
-          _Seg(s.name[0].toUpperCase() + s.name.substring(1)),
+    final sections = ref.watch(sectionsProvider);
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final s in sections)
+          PressScale(
+            scale: 0.96,
+            onTap: () {
+              HapticFeedback.selectionClick();
+              onChanged(s.id);
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 130),
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+              decoration: BoxDecoration(
+                color: s.id == selectedId ? c.accent : c.surface,
+                borderRadius: BorderRadius.circular(AppRadii.chip),
+                border: Border.all(
+                  color: s.id == selectedId ? c.accent : c.border,
+                  width: s.id == selectedId ? 1.5 : 1,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 9,
+                    height: 9,
+                    decoration: BoxDecoration(
+                      color: s.id == selectedId
+                          ? c.onAccent
+                          : sectionColorForKey(c, s.colorKey),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  Text(
+                    s.name,
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 13,
+                      fontWeight: s.id == selectedId
+                          ? FontWeight.w700
+                          : FontWeight.w600,
+                      color: s.id == selectedId ? c.onAccent : c.textSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
       ],
     );
   }

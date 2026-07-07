@@ -10,6 +10,8 @@ import '../../../shared/models/models.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../food/providers/food_providers.dart';
 import '../../habits/providers/habit_provider.dart';
+import '../scoring/focus.dart';
+import '../scoring/section_def.dart';
 import '../scoring/score_engine.dart';
 
 // ────────────────────────────────────────────────────────────────────
@@ -80,6 +82,9 @@ class HomeTask {
 
   /// Back-compat boolean — true when the task has reached its goal.
   bool get isCompleted => ratio >= 1.0;
+
+  /// Deliberate rest day — neutral, excluded from the day score.
+  bool get isRest => log?.restDay == true;
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -118,6 +123,9 @@ String periodForHabit(Habit h) {
 
 bool _appliesOn(Habit h, DateTime date) {
   if (h.isArchived) return false;
+  // A habit only counts from its creation day forward — never retroactively on
+  // days before it existed (so adding a habit can't lower past-day scores).
+  if (!h.existedOn(date)) return false;
   if (h.type == HabitType.todo) {
     if (h.dueDate == null) return true;
     final dd = h.dueDate!;
@@ -137,13 +145,43 @@ bool _appliesOn(Habit h, DateTime date) {
 // PROVIDERS
 // ────────────────────────────────────────────────────────────────────
 
-/// Per-user section weights, normalized to fractions summing to ~1.0.
-/// Falls back to [kDefaultSectionWeights] (40/30/30) when the user profile
-/// has no override.
+/// The user's Focus configuration (persona/phase, custom weights, renames),
+/// parsed from the stored blob. The single source the picker edits and the
+/// score resolves from.
+final focusConfigProvider = Provider<FocusConfig>((ref) {
+  final user = ref.watch(appUserProvider).valueOrNull;
+  final cfg = user?.sectionWeightsJson == null
+      ? FocusConfig.defaults
+      : FocusConfig.fromRaw(user!.sectionWeightsJson);
+  // Mirror the full registry (built-in renames + custom sections) into the
+  // app-wide caches so every `sectionNameOf` / `.label` and the scoring
+  // roll-up (`toSectionEnum`) resolve from one source, no widget threading.
+  final all = cfg.allSections;
+  kSectionNameById = {for (final s in all) s.id: s.name};
+  kSectionParentById = {
+    for (final s in all)
+      if (!s.builtIn) s.id: s.parent,
+  };
+  return cfg;
+});
+
+/// The user's full section registry (3 built-ins + custom), ordered. Drives the
+/// habit-creation picker and the section-management UI.
+final sectionsProvider = Provider<List<SectionDef>>(
+    (ref) => ref.watch(focusConfigProvider).allSections);
+
+/// Per-user section weights, normalized to fractions summing to ~1.0 — resolved
+/// live from the Focus config so what you pick (phase / custom / off) is exactly
+/// what scores you. Falls back to 40/30/30 when nothing is set yet.
 final sectionWeightsProvider = Provider<Map<HabitSection, double>>((ref) {
   final user = ref.watch(appUserProvider).valueOrNull;
-  return normalizeSectionWeights(user?.sectionWeightsJson);
+  if (user?.sectionWeightsJson == null) return kDefaultSectionWeights;
+  return resolveFocusWeights(ref.watch(focusConfigProvider));
 });
+
+/// Display label for a section, honouring the user's rename.
+String sectionLabelOf(WidgetRef ref, HabitSection s) =>
+    ref.watch(focusConfigProvider).labelFor(s);
 
 /// All HomeTasks for [date] — applicable habits joined with that day's logs.
 /// Sorted by period then scheduled time.
@@ -208,7 +246,10 @@ const double kNutritionBodyWeight = 0.5;
 /// with what the score screen shows when browsing history.
 final homeScoreProvider =
     FutureProvider.family<HomeScore, DateTime>((ref, date) async {
-  final tasks = await ref.watch(homeTasksProvider(date).future);
+  final allTasks = await ref.watch(homeTasksProvider(date).future);
+  // Rest days are neutral — kept in the list (so the card can render the rested
+  // state) but excluded from the score so they neither help nor hurt.
+  final tasks = allTasks.where((t) => !t.isRest).toList();
   final weights = ref.watch(sectionWeightsProvider);
   if (tasks.isEmpty) {
     return const HomeScore(
@@ -223,11 +264,6 @@ final homeScoreProvider =
       projectedScore: 0,
     );
   }
-  final b = computeScore(
-    tasks: [for (final t in tasks) ScoredTaskInput(t.habit, t.log)],
-    sectionWeights: weights,
-  );
-
   // Blend nutrition into the body section for today (live) and past days
   // (time-travel). Future days have no food logged yet → habit-only.
   final now = DateTime.now();
@@ -244,48 +280,23 @@ final homeScoreProvider =
         await ref.watch(nutritionRatioForDateProvider(dateOnly).future);
   }
 
-  double bodyRatio = b.sectionRatio[HabitSection.body] ?? 0;
-  double bodyProjected = b.sectionPotential[HabitSection.body] ?? 0;
-  if (nutritionRatio != null) {
-    bodyRatio = bodyRatio * (1 - kNutritionBodyWeight) +
-        nutritionRatio * kNutritionBodyWeight;
-    // Projected assumes nutrition reaches 1.0.
-    bodyProjected = bodyProjected * (1 - kNutritionBodyWeight) +
-        1.0 * kNutritionBodyWeight;
-  }
-
-  // Re-derive the final score with the blended body ratio.
-  final athRatio = b.sectionRatio[HabitSection.athletic] ?? 0;
-  final mindRatio = b.sectionRatio[HabitSection.mind] ?? 0;
-  final wAth = weights[HabitSection.athletic] ?? 0;
-  final wMind = weights[HabitSection.mind] ?? 0;
-  final wBody = weights[HabitSection.body] ?? 0;
-  final blendedScore =
-      ((athRatio * wAth + mindRatio * wMind + bodyRatio * wBody) * 100)
-          .round()
-          .clamp(0, 100);
-  final blendedProjected = ((athRatio * wAth +
-              mindRatio * wMind +
-              bodyProjected * wBody) *
-          100)
-      .round()
-      .clamp(0, 100);
-
-  final sectionPct = <HabitSection, int>{
-    HabitSection.athletic:
-        ((b.sectionRatio[HabitSection.athletic] ?? 0) * 100).round().clamp(0, 110),
-    HabitSection.mind:
-        ((b.sectionRatio[HabitSection.mind] ?? 0) * 100).round().clamp(0, 110),
-    HabitSection.body: (bodyRatio * 100).round().clamp(0, 110),
-  };
+  // Delegate the section-weighted compute + body/nutrition blend to the pure
+  // engine — the same [computeDayScore] the stats series uses, so Trends and
+  // the home ring can never disagree.
+  final d = computeDayScore(
+    tasks: [for (final t in tasks) ScoredTaskInput(t.habit, t.log)],
+    sectionWeights: weights,
+    nutritionRatio: nutritionRatio,
+    nutritionWeight: kNutritionBodyWeight,
+  );
 
   return HomeScore(
-    score: blendedScore,
-    done: b.doneCount,
-    total: b.totalCount,
-    sectionPct: sectionPct,
-    projectedScore: blendedProjected,
-    perTaskContrib: b.perTaskContrib,
+    score: d.score,
+    done: d.done,
+    total: d.total,
+    sectionPct: d.sectionPct,
+    projectedScore: d.projectedScore,
+    perTaskContrib: d.perTaskContrib,
   );
 });
 
@@ -309,6 +320,86 @@ final homeWeekProvider =
       total: score.total,
       sectionPct: score.sectionPct,
       isToday: isToday,
+      isFuture: isFuture,
+    ));
+  }
+  return out;
+});
+
+/// One day in a [dailyScoreSeriesProvider] window.
+class ScoredDayPoint {
+  final DateTime date;
+  final int score; // 0..100
+  final Map<HabitSection, int> sectionPct; // 0..110
+  final int done;
+  final int total;
+  final bool isFuture;
+  const ScoredDayPoint({
+    required this.date,
+    required this.score,
+    required this.sectionPct,
+    required this.done,
+    required this.total,
+    required this.isFuture,
+  });
+}
+
+/// Efficient daily score series for the last [days] days (oldest → newest).
+///
+/// Fetches the window's habit logs ([statsLogsProvider]) and nutrition
+/// ([nutritionRatiosForRangeProvider]) in TWO queries total, then computes each
+/// day locally via [computeDayScore]. Identical numbers to [homeScoreProvider]
+/// (today uses the live nutrition ratio) but without the per-date N+1 that made
+/// 30/90-day trends fire ~2× days queries.
+final dailyScoreSeriesProvider =
+    FutureProvider.autoDispose.family<List<ScoredDayPoint>, int>((ref, days) async {
+  final habits = await ref.watch(habitsProvider.future);
+  final logs = await ref.watch(statsLogsProvider(days).future);
+  final weights = ref.watch(sectionWeightsProvider);
+  final nutritionByDate =
+      await ref.watch(nutritionRatiosForRangeProvider(days).future);
+  final liveToday = ref.watch(todayNutritionRatioProvider);
+
+  final n = DateTime.now();
+  final today = DateTime(n.year, n.month, n.day);
+
+  // Logs grouped by date → habit for O(1) lookup while walking the window.
+  final logsByDate = <String, Map<String, HabitLog>>{};
+  for (final l in logs) {
+    (logsByDate[l.date] ??= <String, HabitLog>{})[l.habitId] = l;
+  }
+
+  final out = <ScoredDayPoint>[];
+  for (int i = days - 1; i >= 0; i--) {
+    final d = DateTime(today.year, today.month, today.day - i);
+    final isToday = d == today;
+    final isFuture = d.isAfter(today);
+    final byHabit = logsByDate[_dateKey(d)] ?? const {};
+    final tasks = <ScoredTaskInput>[
+      for (final h in habits)
+        // Rest days are neutral — excluded from the score, like a non-scheduled
+        // day (keeps the home ring and Trends in agreement).
+        if (_appliesOn(h, d) && byHabit[h.id]?.restDay != true)
+          ScoredTaskInput(h, byHabit[h.id]),
+    ];
+    double? nutrition;
+    if (isToday) {
+      nutrition = liveToday;
+    } else if (!isFuture) {
+      nutrition = nutritionByDate[d] ?? 0.0;
+    }
+    final sd = computeDayScore(
+      tasks: tasks,
+      sectionWeights: weights,
+      nutritionRatio: nutrition,
+      nutritionWeight: kNutritionBodyWeight,
+    );
+    out.add(ScoredDayPoint(
+      date: d,
+      score: sd.score,
+      sectionPct: sd.sectionPct,
+      done: sd.done,
+      total: sd.total,
       isFuture: isFuture,
     ));
   }

@@ -13,11 +13,44 @@ import 'off_client.dart';
 /// (IFCT/USDA, fuzzy + full micros, via the `search_foods` RPC) + Open Food
 /// Facts (branded/packaged). Logging always inserts a `food_logs` row,
 /// optionally mirroring the source food into `foods` so it gets a UUID.
+/// Normalized cache key for a search call — case-insensitive, trimmed, and
+/// limit-aware so a wider request never reuses a narrower cached result.
+String searchCacheKey(String query, int limit) =>
+    '${query.trim().toLowerCase()}|$limit';
+
+/// Tiny bounded LRU. Most-recently-used entries survive; the oldest is evicted
+/// once [capacity] is exceeded.
+class _LruCache<K, V> {
+  _LruCache(this.capacity);
+  final int capacity;
+  final _map = <K, V>{};
+
+  V? get(K key) {
+    final v = _map.remove(key);
+    if (v == null) return null;
+    _map[key] = v; // reinsert → marks most-recently-used
+    return v;
+  }
+
+  void put(K key, V value) {
+    _map.remove(key);
+    _map[key] = value;
+    if (_map.length > capacity) _map.remove(_map.keys.first);
+  }
+}
+
 class FoodRepository {
   final OffClient off;
   FoodRepository({OffClient? off}) : off = off ?? OffClient();
 
   static const _uuid = Uuid();
+
+  // Session caches over the *immutable* search layers — the curated catalog RPC
+  // and Open Food Facts. Repeat / backspace queries return instantly without a
+  // round-trip. The user's own foods are intentionally NOT cached here (they're
+  // merged live in [searchCatalog]) so a newly added food shows up immediately.
+  final _catalogCache = _LruCache<String, List<Food>>(30);
+  final _brandedCache = _LruCache<String, List<Food>>(30);
 
   // ── reads ──────────────────────────────────────────────────────────
 
@@ -40,18 +73,12 @@ class FoodRepository {
   Future<List<Food>> searchBranded(String query, {int limit = 15}) async {
     final q = query.trim();
     if (q.isEmpty) return const [];
-    return off.search(q, limit: limit);
-  }
-
-  /// Full merged result set (catalog + branded). Kept for non-streaming
-  /// callers; the search sheet uses the two-phase methods above for speed.
-  Future<List<Food>> search(String query, {int limit = 40}) async {
-    final core = await searchCatalog(query, limit: limit);
-    List<Food> branded = const [];
-    try {
-      branded = await searchBranded(query);
-    } catch (_) {}
-    return _dedup([...core, ...branded]).take(limit).toList();
+    final key = searchCacheKey(q, limit);
+    final cached = _brandedCache.get(key);
+    if (cached != null) return cached;
+    final res = await off.search(q, limit: limit);
+    _brandedCache.put(key, res);
+    return res;
   }
 
   Future<List<Food>> _userFoods(String q) async {
@@ -93,12 +120,19 @@ class FoodRepository {
   /// Typo-tolerant (pg_trgm), alias-aware, ranked by relevance + popularity.
   /// Public-read, so this works in dev mode (anon) too.
   Future<List<Food>> catalogSearch(String query, {int limit = 25}) async {
-    final res = await SupabaseService.client
-        .rpc('search_foods', params: {'q': query, 'lim': limit});
-    return (res as List)
+    final key = searchCacheKey(query, limit);
+    final cached = _catalogCache.get(key);
+    if (cached != null) return cached;
+    final res = await SupabaseService.client.rpc(
+      'search_foods',
+      params: {'q': query, 'lim': limit},
+    );
+    final foods = (res as List)
         .cast<Map<String, dynamic>>()
         .map(Food.fromCatalog)
         .toList();
+    _catalogCache.put(key, foods);
+    return foods;
   }
 
   /// Resolve a scanned [code]: our catalog first (instant — bulk-imported OFF
@@ -133,29 +167,45 @@ class FoodRepository {
   Future<void> _cacheBranded(Food f) async {
     final code = f.offBarcode;
     if (code == null || code.isEmpty) return;
-    await SupabaseService.client.from('food_catalog').upsert({
-      'id': 'off:$code',
-      'source': 'off',
-      'barcode': code,
-      'name': f.name,
-      if (f.brand != null) 'brand': f.brand,
-      'serving_qty': 100,
-      'serving_unit': 'g',
-      ...f.per.toColumns(),
-      'region': 'IN',
-      'popularity': 4,
-      'measures': const [
-        {'label': 'g', 'g': 1},
-        {'label': 'Pack', 'g': 50},
-      ],
-      'search_text': '${f.name} ${f.brand ?? ''}'.toLowerCase().trim(),
-    }, onConflict: 'id', ignoreDuplicates: true);
+    await SupabaseService.client
+        .from('food_catalog')
+        .upsert(
+          {
+            'id': 'off:$code',
+            'source': 'off',
+            'barcode': code,
+            'name': f.name,
+            if (f.brand != null) 'brand': f.brand,
+            'serving_qty': 100,
+            'serving_unit': 'g',
+            ...f.per.toColumns(),
+            'region': 'IN',
+            'popularity': 4,
+            // Persist the food's own measures (parsed from OFF's serving size) so the
+            // cached row defaults to the same "1 Serving"/"1 Pack" as the live scan.
+            'measures': f.measures.isNotEmpty
+                ? [
+                    for (final m in f.measures)
+                      {'label': m.label, 'g': m.grams},
+                  ]
+                : const [
+                    {'label': 'g', 'g': 1},
+                    {'label': 'Pack', 'g': 50},
+                  ],
+            'search_text': '${f.name} ${f.brand ?? ''}'.toLowerCase().trim(),
+          },
+          onConflict: 'id',
+          ignoreDuplicates: true,
+        );
   }
 
   /// The user's most-logged foods over the last [days] days, with their log
   /// counts — powers personalised ranking (your frequent picks float to the
   /// top of matching searches). Empty in dev mode / when nothing's logged.
-  Future<List<FrequentFood>> frequentFoods({int days = 90, int limit = 40}) async {
+  Future<List<FrequentFood>> frequentFoods({
+    int days = 90,
+    int limit = 40,
+  }) async {
     final start = _dateStr(DateTime.now().subtract(Duration(days: days)));
     final rows = await SupabaseService.client
         .from('food_logs')
@@ -168,17 +218,17 @@ class FoodRepository {
       if (id != null) counts[id] = (counts[id] ?? 0) + 1;
     }
     if (counts.isEmpty) return const [];
-    final top = (counts.keys.toList()
-          ..sort((a, b) => counts[b]!.compareTo(counts[a]!)))
-        .take(limit)
-        .toList();
+    final top =
+        (counts.keys.toList()..sort((a, b) => counts[b]!.compareTo(counts[a]!)))
+            .take(limit)
+            .toList();
     final foods = await SupabaseService.client
         .from('foods')
         .select()
         .inFilter('id', top);
     final map = {
       for (final f in (foods as List).cast<Map<String, dynamic>>())
-        f['id'] as String: Food.fromJson(f)
+        f['id'] as String: Food.fromJson(f),
     };
     return [
       for (final id in top)
@@ -190,7 +240,9 @@ class FoodRepository {
     // Distinct foods from the user's most recent food_logs.
     final rows = await SupabaseService.client
         .from('food_logs')
-        .select('food_id, meal_name, calories, protein, carbs, fat, unit, created_at')
+        .select(
+          'food_id, meal_name, calories, protein, carbs, fat, unit, created_at',
+        )
         .not('food_id', 'is', null)
         .order('created_at', ascending: false)
         .limit(limit * 3);
@@ -207,9 +259,13 @@ class FoodRepository {
         .select()
         .inFilter('id', ids);
     final map = {
-      for (final f in (foods as List).cast<Map<String, dynamic>>()) f['id'] as String: Food.fromJson(f)
+      for (final f in (foods as List).cast<Map<String, dynamic>>())
+        f['id'] as String: Food.fromJson(f),
     };
-    return [for (final id in ids) if (map[id] != null) map[id]!];
+    return [
+      for (final id in ids)
+        if (map[id] != null) map[id]!,
+    ];
   }
 
   Future<List<Food>> favorites() async {
@@ -218,7 +274,10 @@ class FoodRepository {
         .select()
         .eq('is_favorite', true)
         .order('name');
-    return (rows as List).cast<Map<String, dynamic>>().map(Food.fromJson).toList();
+    return (rows as List)
+        .cast<Map<String, dynamic>>()
+        .map(Food.fromJson)
+        .toList();
   }
 
   // ── writes ─────────────────────────────────────────────────────────
@@ -236,11 +295,15 @@ class FoodRepository {
     }
     final userId = SupabaseService.auth.currentUser!.id;
     try {
-      final dedup = SupabaseService.client.from('foods').select('id').eq('user_id', userId);
-      final existing = await (isOff
-              ? dedup.eq('off_barcode', f.offBarcode!)
-              : dedup.eq('catalog_id', f.catalogId!))
-          .maybeSingle();
+      final dedup = SupabaseService.client
+          .from('foods')
+          .select('id')
+          .eq('user_id', userId);
+      final existing =
+          await (isOff
+                  ? dedup.eq('off_barcode', f.offBarcode!)
+                  : dedup.eq('catalog_id', f.catalogId!))
+              .maybeSingle();
       if (existing != null) return existing['id'] as String;
 
       final insert = await SupabaseService.client
@@ -276,17 +339,22 @@ class FoodRepository {
     }
   }
 
-  /// Log a portion of [food] (= [qty] of `food.servingUnit`) at [slot] on [date].
+  /// Log a portion of [food] at [slot] on [date]. [qty] is the amount in grams
+  /// (it scales the nutrients). [displayQty]/[displayUnit] are the human-facing
+  /// portion to store and show in the diary (e.g. 1 "Cup") — defaulting to the
+  /// gram amount so callers that don't care keep the old behaviour.
   Future<MealEntry> logFood({
     required Food food,
     required double qty,
     required MealTimeSlot slot,
     required DateTime date,
+    double? displayQty,
+    String? displayUnit,
   }) async {
     final userId = SupabaseService.auth.currentUser!.id;
     final foodId = await _materialise(food);
 
-    // Scale = qty ÷ servingQty (both in the same unit).
+    // Scale = qty ÷ servingQty (both in grams).
     final factor = food.servingQty == 0 ? 1.0 : qty / food.servingQty;
     final scaled = food.per.scale(factor);
 
@@ -297,12 +365,14 @@ class FoodRepository {
       name: food.displayLine,
       date: date,
       slot: slot,
-      qty: qty,
-      unit: food.servingUnit,
+      qty: displayQty ?? qty,
+      unit: displayUnit ?? food.servingUnit,
       totals: scaled,
     );
-    final inserted =
-        await OfflineWriter.insert(table: 'food_logs', payload: row.toInsert());
+    final inserted = await OfflineWriter.insert(
+      table: 'food_logs',
+      payload: row.toInsert(),
+    );
     return MealEntry.fromJson(inserted);
   }
 
@@ -333,8 +403,10 @@ class FoodRepository {
         fatG: fatG,
       ),
     );
-    final inserted =
-        await OfflineWriter.insert(table: 'food_logs', payload: row.toInsert());
+    final inserted = await OfflineWriter.insert(
+      table: 'food_logs',
+      payload: row.toInsert(),
+    );
     return MealEntry.fromJson(inserted);
   }
 
@@ -378,12 +450,23 @@ class FoodRepository {
     );
   }
 
-  /// Toggle favorite flag on a food.
+  /// Toggle favorite flag on a food already in `foods` (by id).
   Future<void> toggleFavorite(String foodId, bool value) async {
     await SupabaseService.client
         .from('foods')
         .update({'is_favorite': value})
         .eq('id', foodId);
+  }
+
+  /// Favourite/unfavourite any [food]. Catalog (IFCT/USDA/dish) and OFF foods
+  /// are first mirrored into `foods` so they have a row to flag (and then show
+  /// up in Favourites + Recents). Works for every source — no need to log first.
+  Future<void> setFavorite(Food food, bool value) async {
+    final id = await _materialise(food);
+    await SupabaseService.client
+        .from('foods')
+        .update({'is_favorite': value})
+        .eq('id', id);
   }
 
   /// Copy all entries from [srcSlot] on [srcDate] to [destSlot] on [destDate].
@@ -431,10 +514,12 @@ class FoodRepository {
     final userId = SupabaseService.auth.currentUser!.id;
     final ds = _dateStr(date);
     final slot = link['slot'] as String? ?? 'snack';
-    final items = (link['items'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+    final items =
+        (link['items'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
 
     final rows = items.map((it) {
-      final micros = (it['micros'] as Map?)?.cast<String, dynamic>() ?? const {};
+      final micros =
+          (it['micros'] as Map?)?.cast<String, dynamic>() ?? const {};
       return {
         'user_id': userId,
         if (it['food_id'] != null) 'food_id': it['food_id'],
@@ -479,16 +564,19 @@ class FoodRepository {
         .from('water_logs')
         .select('ml')
         .eq('date', ds);
-    return (rows as List).fold<int>(0, (a, r) => a + ((r['ml'] as num?)?.toInt() ?? 0));
+    return (rows as List).fold<int>(
+      0,
+      (a, r) => a + ((r['ml'] as num?)?.toInt() ?? 0),
+    );
   }
 
   Future<void> addWater(int ml, DateTime date) async {
-    final userId = SupabaseService.auth.currentUser!.id;
-    await OfflineWriter.insert(table: 'water_logs', payload: {
-      'user_id': userId,
-      'date': _dateStr(date),
-      'ml': ml,
-    });
+    final user = SupabaseService.auth.currentUser;
+    if (user == null) return; // no session (demo/offline) — nothing to persist
+    await OfflineWriter.insert(
+      table: 'water_logs',
+      payload: {'user_id': user.id, 'date': _dateStr(date), 'ml': ml},
+    );
   }
 
   /// Best-effort removal of the most recent water entry today. Reads the
@@ -505,7 +593,10 @@ class FoodRepository {
           .limit(1)
           .maybeSingle();
       if (last != null) {
-        await OfflineWriter.delete(table: 'water_logs', id: last['id'] as String);
+        await OfflineWriter.delete(
+          table: 'water_logs',
+          id: last['id'] as String,
+        );
       }
     } catch (_) {
       // Offline — silently no-op. User can remove from their offline log on next reconnect.
@@ -523,7 +614,10 @@ class FoodRepository {
         .select()
         .eq('date', ds)
         .order('created_at');
-    return (rows as List).cast<Map<String, dynamic>>().map(MealEntry.fromJson).toList();
+    return (rows as List)
+        .cast<Map<String, dynamic>>()
+        .map(MealEntry.fromJson)
+        .toList();
   }
 
   /// Entries between [start] and [end] inclusive, bucketed by date-only.
@@ -599,8 +693,10 @@ class FoodRepository {
       unit: template.unit,
       totals: template.totals,
     );
-    final inserted =
-        await OfflineWriter.insert(table: 'food_logs', payload: row.toInsert());
+    final inserted = await OfflineWriter.insert(
+      table: 'food_logs',
+      payload: row.toInsert(),
+    );
     return MealEntry.fromJson(inserted);
   }
 }

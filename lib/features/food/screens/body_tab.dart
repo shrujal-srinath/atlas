@@ -9,6 +9,7 @@ import '../../../shared/widgets/app_snackbar.dart';
 import '../../../shared/widgets/atlas_controls.dart';
 import '../domain/weight_entry.dart';
 import '../providers/weight_providers.dart';
+import '../../auth/providers/auth_provider.dart';
 import '../../../shared/widgets/atlas_error.dart';
 import '../../../shared/widgets/atlas_skeleton.dart';
 
@@ -104,6 +105,10 @@ class _CurrentWeightCard extends ConsumerWidget {
     final c = context.c;
     final t = context.t;
     final latest = logs.isEmpty ? null : logs.last;
+    // Fall back to the profile weight (the engine's canonical value) so the
+    // card never shows "—" while a real weight exists on the profile.
+    final profileKg = ref.watch(appUserProvider).valueOrNull?.weightKg;
+    final displayKg = latest?.kg ?? profileKg;
     final delta7 = ref.watch(weightDeltaProvider(7));
     final delta30 = ref.watch(weightDeltaProvider(30));
 
@@ -124,11 +129,12 @@ class _CurrentWeightCard extends ConsumerWidget {
                   style: AppType.overline.copyWith(
                       color: c.textMuted, letterSpacing: 1.2)),
               const Spacer(),
-              if (latest != null)
-                Text(
-                  'Logged ${DateFormat('MMM d').format(latest.date)}',
-                  style: AppType.meta.copyWith(color: c.textMuted),
-                ),
+              Text(
+                latest != null
+                    ? 'Logged ${DateFormat('MMM d').format(latest.date)}'
+                    : (displayKg != null ? 'From profile' : ''),
+                style: AppType.meta.copyWith(color: c.textMuted),
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -136,7 +142,7 @@ class _CurrentWeightCard extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                latest == null ? '—' : latest.kg.toStringAsFixed(1),
+                displayKg == null ? '—' : displayKg.toStringAsFixed(1),
                 style: AppType.display.copyWith(
                   color: c.textPrimary,
                   fontSize: 40,
@@ -261,6 +267,43 @@ class _WeightChartCard extends StatelessWidget {
               LineChartData(
                 minY: minKg - pad,
                 maxY: maxKg + pad,
+                clipData: const FlClipData.all(),
+                lineTouchData: LineTouchData(
+                  getTouchedSpotIndicator: (barData, indexes) => [
+                    for (final _ in indexes)
+                      TouchedSpotIndicatorData(
+                        FlLine(
+                          color: (barData.color ?? c.accent)
+                              .withValues(alpha: 0.30),
+                          strokeWidth: 1.5,
+                        ),
+                        FlDotData(
+                          getDotPainter: (s, p, b, i) => FlDotCirclePainter(
+                            radius: 3.5,
+                            color: b.color ?? c.accent,
+                            strokeWidth: 2,
+                            strokeColor: c.surface,
+                          ),
+                        ),
+                      ),
+                  ],
+                  touchTooltipData: LineTouchTooltipData(
+                    getTooltipColor: (_) => c.surfaceElevated,
+                    fitInsideHorizontally: true,
+                    fitInsideVertically: true,
+                    getTooltipItems: (spots) => spots
+                        .map((s) => LineTooltipItem(
+                              '${s.y.toStringAsFixed(1)} kg',
+                              TextStyle(
+                                fontFamily: 'SpaceGrotesk',
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: c.textPrimary,
+                              ),
+                            ))
+                        .toList(),
+                  ),
+                ),
                 gridData: FlGridData(
                   show: true,
                   drawVerticalLine: false,
@@ -289,6 +332,7 @@ class _WeightChartCard extends StatelessWidget {
                     spots: spots,
                     isCurved: true,
                     curveSmoothness: 0.2,
+                    preventCurveOverShooting: true,
                     color: c.accent,
                     barWidth: 2,
                     dotData: FlDotData(
@@ -427,7 +471,11 @@ class _MeasurementsCard extends ConsumerWidget {
               TextButton(
                 onPressed: () {
                   final v = double.tryParse(ctl.text.replaceAll(',', '.'));
-                  if (v == null || v <= 0) return;
+                  if (v == null || v <= 0 || v > 300) {
+                    showSnack(ctx, 'Enter a measurement between 1–300 cm.',
+                        isError: true);
+                    return;
+                  }
                   Navigator.of(ctx).pop((kind: kind, cm: v));
                 },
                 child: const Text('Save'),
@@ -512,15 +560,64 @@ class _AddWeightSheetState extends ConsumerState<_AddWeightSheet> {
     setState(() => _saving = true);
     try {
       final repo = ref.read(weightRepositoryProvider);
-      await repo.add(kg: v, note: _note.text.trim().isEmpty ? null : _note.text.trim());
+      // One point per day — re-logging today updates rather than duplicates.
+      await repo.upsertForDate(
+        kg: v,
+        date: DateTime.now(),
+        note: _note.text.trim().isEmpty ? null : _note.text.trim(),
+      );
       if (!mounted) return;
       widget.onSaved();
       HapticFeedback.mediumImpact();
+
+      // Ask before changing the profile weight that drives calorie targets.
+      final profileKg = ref.read(appUserProvider).valueOrNull?.weightKg;
+      final shouldOffer = profileKg == null || (profileKg - v).abs() >= 0.1;
+      if (shouldOffer) {
+        final apply = await _confirmTargetUpdate(v);
+        if (apply == true) {
+          await ref
+              .read(userActionsProvider.notifier)
+              .update({'weight_kg': v});
+        }
+      }
+
+      if (!mounted) return;
       Navigator.of(context).pop();
     } catch (e) {
       if (!mounted) return;
       setState(() => _saving = false);
       showErrorSnack(context, e);
     }
+  }
+
+  /// "Update your targets to X kg?" — keeps the engine's weight in sync with
+  /// what you just logged, but only with your say-so.
+  Future<bool?> _confirmTargetUpdate(double kg) {
+    final c = context.c;
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: c.surface,
+        title: Text('Update your targets?', style: ctx.t.h2),
+        content: Text(
+          'Set your profile weight to ${kg.toStringAsFixed(1)} kg so your '
+          'calories and macros recompute for it?',
+          style: ctx.t.body.copyWith(color: c.textSecondary, height: 1.4),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Not now',
+                style: ctx.t.bodyStrong.copyWith(color: c.textSecondary)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child:
+                Text('Update', style: ctx.t.bodyStrong.copyWith(color: c.accent)),
+          ),
+        ],
+      ),
+    );
   }
 }

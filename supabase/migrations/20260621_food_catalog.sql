@@ -112,8 +112,10 @@ begin
         + 6  * word_similarity(nq, c.search_text)
         -- commonly-eaten foods beat rare ones within the matched set
         + least(c.popularity, 95) * 0.62
-        -- penalise specific/rare qualified variants ("Egg, quail, whole, raw")
-        - 7 * (length(c.name) - length(translate(c.name, ',', '')))
+        -- penalise only HEAVILY-qualified (rare) names — 3rd comma onward — so
+        -- "Egg, quail, whole, raw" sinks but common staples like
+        -- "Milk, whole, Cow" (2 commas) are not punished.
+        - 6 * greatest((length(c.name) - length(translate(c.name, ',', ''))) - 1, 0)
       ) desc,
       length(c.name) asc
     limit greatest(coalesce(lim, 25), 1);

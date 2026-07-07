@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/widgets/app_snackbar.dart';
 import '../../../shared/widgets/atlas_back_button.dart';
 import '../data/notes_repository.dart';
 import '../domain/folder_style.dart';
@@ -137,8 +138,12 @@ class _NoteEditorScreenState extends ConsumerState<NoteEditorScreen> {
         _items.add(item);
         _itemCtrls[item.id] = TextEditingController(text: trimmed);
       });
-    } catch (_) {}
-    _addCtrl.clear();
+      // Only clear on success — otherwise the input looks like it worked
+      // while the typed item silently never made it into the list.
+      _addCtrl.clear();
+    } catch (e) {
+      if (mounted) showErrorSnack(context, e);
+    }
     _addFocus.requestFocus();
   }
 

@@ -14,6 +14,21 @@ import '../providers/mood_log_providers.dart';
 /// 1..5 mood faces, shared by the inline row and the collapsed chip.
 const _moodEmoji = ['😩', '😕', '😐', '🙂', '😄'];
 
+/// Holds the moment the current slot's check-in was completed, surviving widget
+/// rebuilds within a session. Without this the optimistic "hide once answered"
+/// lived only in ephemeral State, so any rebuild (or the demo/offline path,
+/// where the `mood_logs` write never round-trips) could re-show an answered
+/// card. A stale value from an earlier slot/day is harmless — it compares as
+/// "before" the new slot and the card simply shows again.
+final _lastCheckinCommitProvider = StateProvider<DateTime?>((_) => null);
+
+/// "5:00 AM" style label for a slot start (slots land on the hour).
+String _fmtSlotTime(DateTime t) {
+  final h = t.hour % 12 == 0 ? 12 : t.hour % 12;
+  final ampm = t.hour < 12 ? 'AM' : 'PM';
+  return '$h:${t.minute.toString().padLeft(2, '0')} $ampm';
+}
+
 /// Inline daily check-in. Prompts for mood + energy on a **fixed 2-hour clock**
 /// — slots at 05:00, 07:00, … 21:00 (every two hours from 5am through 9pm). The
 /// card appears at the top of each slot and, the moment you answer both, slides
@@ -43,10 +58,27 @@ class _WellnessCheckInCardState extends ConsumerState<WellnessCheckInCard> {
   // upsert RPC takes a beat to round-trip.
   JournalEntry? _local;
 
-  /// Optimistic completion time so the card hides instantly once both mood and
-  /// energy are set — works even in dev/offline where the `mood_logs` re-query
-  /// would come back empty.
+  /// Optimistic completion time so the card hides once both mood and energy
+  /// are set — works even in dev/offline where the `mood_logs` re-query would
+  /// come back empty.
   DateTime? _committedAt;
+
+  /// This slot's OWN answers (reset whenever the active slot changes), so a new
+  /// slot starts blank instead of pre-filling the value entered 2 hours ago.
+  int? _slotMood;
+  int? _slotEnergy;
+  DateTime? _slotStamp;
+
+  /// Clears the slot-local answers when the active slot rolls over.
+  void _syncSlot(DateTime now) {
+    final slot = _currentSlotStart(now);
+    if (slot != _slotStamp) {
+      _slotStamp = slot;
+      _slotMood = null;
+      _slotEnergy = null;
+      _committedAt = null; // a fresh slot is unanswered
+    }
+  }
 
   // Re-evaluates visibility as the wall clock crosses a slot boundary, so the
   // card appears at 07:00/09:00/… without needing a manual refresh.
@@ -68,22 +100,27 @@ class _WellnessCheckInCardState extends ConsumerState<WellnessCheckInCard> {
 
   Future<void> _setField({int? mood, int? energy}) async {
     HapticFeedback.selectionClick();
+    final now = DateTime.now();
+    _syncSlot(now);
     final user = ref.read(appUserProvider).valueOrNull;
     final date = ref.read(selectedDateProvider);
-    final current = _local ??
+    setState(() {
+      if (mood != null) _slotMood = mood;
+      if (energy != null) _slotEnergy = energy;
+    });
+    final base = _local ??
         ref.read(journalForSelectedDateProvider).valueOrNull ??
         (user == null ? null : JournalEntry.empty(user.id, date));
-    if (current == null) return; // no auth, nothing to persist
-    final updated = current.copyWith(mood: mood, energy: energy);
-    setState(() => _local = updated);
-    // Decide completion against the local copy *now* so the exit animation
-    // begins on the same frame as the tap — the network write trails behind.
-    _commitIfComplete(updated);
+    if (base == null) return; // no auth, nothing to persist
+    // Journal keeps the day's latest values; mood_log captures this slot.
+    final updated = base.copyWith(mood: _slotMood, energy: _slotEnergy);
+    _local = updated;
+    _commitIfComplete();
     try {
       final repo = ref.read(journalRepositoryProvider);
       final persisted = await repo.upsert(updated);
       if (!mounted) return;
-      setState(() => _local = persisted);
+      _local = persisted;
       ref.invalidate(journalForSelectedDateProvider);
     } catch (_) {
       // Dev mode / offline — local state stands. The next sync will retry.
@@ -96,10 +133,11 @@ class _WellnessCheckInCardState extends ConsumerState<WellnessCheckInCard> {
   /// Once **both** mood and energy exist for today's active slot, optimistically
   /// hide the card and append a single combined `mood_logs` point. Skips past
   /// dates and avoids a duplicate write inside the same slot.
-  void _commitIfComplete(JournalEntry e) {
+  void _commitIfComplete() {
     final now = DateTime.now();
     if (!DateUtils.isSameDay(ref.read(selectedDateProvider), now)) return;
-    if (e.mood == null || e.energy == null) return; // need both
+    final m = _slotMood, e = _slotEnergy;
+    if (m == null || e == null) return; // need both, answered THIS slot
 
     final slot = _currentSlotStart(now);
     final lastFull = _lastFullCheckinTime();
@@ -107,17 +145,23 @@ class _WellnessCheckInCardState extends ConsumerState<WellnessCheckInCard> {
       if (mounted) setState(() {}); // already logged this slot — keep hidden
       return;
     }
-    if (!mounted) return;
-    setState(() => _committedAt = now); // hide on this frame
-    // Fire-and-forget the timeseries write; the optimistic hide already landed.
+
+    // Append the timeseries point immediately.
     () async {
       try {
-        await ref
-            .read(moodLogRepositoryProvider)
-            .add(mood: e.mood!, energy: e.energy!);
+        await ref.read(moodLogRepositoryProvider).add(mood: m, energy: e);
         if (mounted) ref.invalidate(moodTodayLogsProvider);
       } catch (_) {/* offline / dev */}
     }();
+
+    // Hold the completed selection on screen briefly so the user can SEE what
+    // they picked, THEN slide the card away (the AnimatedSwitcher exit follows).
+    Future.delayed(const Duration(milliseconds: 750), () {
+      if (!mounted) return;
+      final at = DateTime.now();
+      setState(() => _committedAt = at);
+      ref.read(_lastCheckinCommitProvider.notifier).state = at;
+    });
   }
 
   /// Start of the slot currently accepting a check-in, or null when we're
@@ -140,7 +184,7 @@ class _WellnessCheckInCardState extends ConsumerState<WellnessCheckInCard> {
   /// Newest *complete* (mood + energy) check-in today, from the optimistic
   /// commit or the persisted logs. Null when there is none.
   DateTime? _lastFullCheckinTime() {
-    DateTime? at = _committedAt;
+    DateTime? at = _committedAt ?? ref.read(_lastCheckinCommitProvider);
     final logs = ref.read(moodTodayLogsProvider).valueOrNull ?? const [];
     for (final l in logs) {
       if (l.mood != null && l.energy != null) at = l.loggedAt; // newest last
@@ -168,10 +212,15 @@ class _WellnessCheckInCardState extends ConsumerState<WellnessCheckInCard> {
     // show the full rows for editing. Re-watch the logs so an external write
     // (or invalidation) rebuilds the card.
     final now = DateTime.now();
+    _syncSlot(now); // clear last slot's answers when the slot rolls over
     final selected = ref.watch(selectedDateProvider);
     final isToday = DateUtils.isSameDay(selected, now);
     ref.watch(moodTodayLogsProvider);
+    ref.watch(_lastCheckinCommitProvider); // rebuild when a commit lands
     final hidden = isToday && !_shouldShow(now);
+    // The active slot's start time — shown as a small tag so you know which
+    // 2-hour check-in this is (05:00, 07:00, … 21:00).
+    final slot = isToday ? _currentSlotStart(now) : null;
 
     final card = Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
@@ -202,6 +251,19 @@ class _WellnessCheckInCardState extends ConsumerState<WellnessCheckInCard> {
                   color: c.textMuted,
                 ),
               ),
+              if (slot != null) ...[
+                const SizedBox(width: 7),
+                Text(
+                  _fmtSlotTime(slot),
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.2,
+                    color: c.textMuted,
+                  ),
+                ),
+              ],
               const Spacer(),
               GestureDetector(
                 onTap: () => context.push('/journal'),
@@ -227,12 +289,14 @@ class _WellnessCheckInCardState extends ConsumerState<WellnessCheckInCard> {
           ),
           const SizedBox(height: 10),
           _MoodRow(
-            selected: entry?.mood,
+            // Today: only this slot's own pick (blank until tapped). Past dates:
+            // the stored value, for editing.
+            selected: isToday ? _slotMood : entry?.mood,
             onSelect: _setMood,
           ),
           const SizedBox(height: 8),
           _EnergyRow(
-            selected: entry?.energy,
+            selected: isToday ? _slotEnergy : entry?.energy,
             onSelect: _setEnergy,
           ),
           if (entry?.sleepHours != null || entry?.sleepQuality != null) ...[

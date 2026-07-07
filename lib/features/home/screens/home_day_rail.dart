@@ -122,7 +122,7 @@ class _DayRailState extends ConsumerState<_DayRail> {
     _TaskVM? due;
     _TaskVM? next;
     for (final t in sorted) {
-      if (t.done) continue;
+      if (t.done || t.isRest) continue; // rested = handled, don't auto-spotlight
       if (_isAfterNow(t)) {
         next ??= t;
       } else {
@@ -185,7 +185,8 @@ class _DayRailState extends ConsumerState<_DayRail> {
                 sorted.any((t) => t.id == _override && !t.done))
             ? _override
             : auto?.id;
-    final allDone = sorted.every((t) => t.done);
+    // A day is "all clear" when every task is either finished or rested.
+    final allDone = sorted.every((t) => t.done || t.isRest);
 
     // Flatten into slots, then find where NOW belongs. If NOW lands on the
     // first task of a period, the divider goes above that period's header.
@@ -229,6 +230,15 @@ class _DayRailState extends ConsumerState<_DayRail> {
             task: t,
             onTapNode: () => widget.onToggle(t),
             onTapRow: () => _openSheet(t),
+          ));
+        } else if (t.isRest && t.id != expandedId) {
+          // A deliberate rest reads as a calm receipt — tap to reopen it (so the
+          // user can finish or undo the rest via the expanded card).
+          rows.add(_DoneRow(
+            task: t,
+            rested: true,
+            onTapNode: () => _focus(t.id),
+            onTapRow: () => _focus(t.id),
           ));
         } else if (t.id == expandedId) {
           rows.add(_ExpandedRow(
@@ -610,23 +620,26 @@ class _DoneRow extends StatelessWidget {
   final _TaskVM task;
   final VoidCallback onTapNode;
   final VoidCallback onTapRow;
+  /// Rested receipt variant — a neutral "Rest day" line instead of a struck-out
+  /// completion. Used for flexible-count habits the user rested today.
+  final bool rested;
   const _DoneRow({
     required this.task,
     required this.onTapNode,
     required this.onTapRow,
+    this.rested = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    // One uniform accent for every task — section is shown by the label text,
-    // not by recolouring the whole card.
-    final cat = c.accent;
+    // Habit colour on the node keeps the receipt line subtly identifiable.
+    final cat = _habitColorFor(context, task);
     return _RailRow(
       timeLabel: task.time,
       timeColor: c.textMuted.withValues(alpha: 0.5),
       nodeTop: 13,
-      node: _RailNode(color: cat, done: true),
+      node: _RailNode(color: rested ? c.textMuted : cat, done: true),
       onTapNode: onTapNode,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
@@ -643,7 +656,8 @@ class _DoneRow extends StatelessWidget {
                     fontSize: 12.5,
                     fontWeight: FontWeight.w500,
                     color: c.textMuted.withValues(alpha: 0.7),
-                    decoration: TextDecoration.lineThrough,
+                    decoration:
+                        rested ? null : TextDecoration.lineThrough,
                     decorationColor: c.textMuted.withValues(alpha: 0.4),
                     height: 1.15,
                   ),
@@ -651,7 +665,21 @@ class _DoneRow extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              if (task.streak > 0) ...[
+              if (rested) ...[
+                Icon(LucideIcons.coffee,
+                    size: 11, color: c.textMuted.withValues(alpha: 0.8)),
+                const SizedBox(width: 4),
+                Text(
+                  'Rest day',
+                  style: TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    color: c.textMuted,
+                    height: 1.0,
+                  ),
+                ),
+              ] else if (task.streak > 0) ...[
                 Icon(LucideIcons.flame,
                     size: 9, color: c.amber.withValues(alpha: 0.55)),
                 const SizedBox(width: 2),
@@ -690,9 +718,8 @@ class _CompactRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
-    // One uniform accent for every task — section is shown by the label text,
-    // not by recolouring the whole card.
-    final cat = c.accent;
+    // The habit's own colour, used subtly — the icon + the progress ring/node.
+    final cat = _habitColorFor(context, task);
     final prio = _priorityIcon(task.priority);
     final hasPartial = task.isNumeric && (task.current ?? 0) > 0;
     return _RailRow(
@@ -717,11 +744,12 @@ class _CompactRow extends StatelessWidget {
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: c.surfaceElevated,
+                  color: cat.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(11),
-                  border: Border.all(color: c.border, width: 0.5),
+                  border: Border.all(
+                      color: cat.withValues(alpha: 0.22), width: 0.5),
                 ),
-                child: Icon(task.icon, size: 17, color: c.textSecondary),
+                child: Icon(task.icon, size: 17, color: cat),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -938,13 +966,66 @@ class _ExpandedRowState extends ConsumerState<_ExpandedRow> {
     );
   }
 
+  // Flexible "X / week" habits: mark today a deliberate rest (neutral) or undo.
+  void _toggleRest() {
+    HapticFeedback.selectionClick();
+    _commit?.cancel();
+    _dirty = false;
+    ref
+        .read(habitActionsProvider.notifier)
+        .setRestDay(widget.task.id, _dateKey, rest: !widget.task.isRest);
+  }
+
+  /// The small neutral "Rest" button shown beside Finish for flexible-count
+  /// habits (1 part to Finish's 3). Fills in when today is already a rest.
+  Widget _restButton(AppPalette c, _TaskVM t) {
+    final rested = t.isRest;
+    return SizedBox(
+      height: 46,
+      child: FilledButton(
+        onPressed: _toggleRest,
+        style: FilledButton.styleFrom(
+          backgroundColor: rested ? c.textSecondary : c.surfaceElevated,
+          foregroundColor: rested ? Colors.white : c.textSecondary,
+          elevation: 0,
+          padding: EdgeInsets.zero,
+          side: rested ? null : BorderSide(color: c.borderStrong),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.button),
+          ),
+        ),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(LucideIcons.coffee, size: 15),
+              const SizedBox(width: 5),
+              Text(
+                rested ? 'Resting' : 'Rest',
+                style: const TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.1,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.c;
     final t = widget.task;
-    // Uniform accent across every task (see _CompactRow) — the focus card
-    // earns its emphasis from the border, lift and accents, not a section hue.
+    // The focus card earns its emphasis from the border, lift and accents
+    // (brand ruby — keeps CTA contrast safe). The habit's own colour shows on
+    // the leading icon for identity continuity with the compact row.
     final cat = c.accent;
+    final hc = _habitColorFor(context, t);
     final prio = _priorityIcon(t.priority);
     final target = t.target ?? 0;
     final pct = target <= 0 ? 0.0 : (_value / target).clamp(0.0, 1.0);
@@ -994,10 +1075,10 @@ class _ExpandedRowState extends ConsumerState<_ExpandedRow> {
                     width: 44,
                     height: 44,
                     decoration: BoxDecoration(
-                      color: cat.withValues(alpha: 0.14),
+                      color: hc.withValues(alpha: 0.14),
                       borderRadius: BorderRadius.circular(14),
                     ),
-                    child: Icon(t.icon, size: 21, color: cat),
+                    child: Icon(t.icon, size: 21, color: hc),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -1185,7 +1266,10 @@ class _ExpandedRowState extends ConsumerState<_ExpandedRow> {
             const SizedBox(height: 13),
             Row(
               children: [
+                // Finish takes 3 parts; the optional Rest button takes 1 — the
+                // 3:1 split for flexible "X / week" habits.
                 Expanded(
+                  flex: 3,
                   child: SizedBox(
                     height: 46,
                     child: FilledButton.icon(
@@ -1210,12 +1294,16 @@ class _ExpandedRowState extends ConsumerState<_ExpandedRow> {
                     ),
                   ),
                 ),
+                if (t.isFlexibleCount) ...[
+                  const SizedBox(width: 8),
+                  Expanded(flex: 1, child: _restButton(c, t)),
+                ],
                 const SizedBox(width: 8),
                 _SquareAction(
                   icon: LucideIcons.edit3,
                   onTap: widget.onNote,
                 ),
-                if (t.type == 'timer') ...[
+                if (t.type == 'timer' && !t.isFlexibleCount) ...[
                   const SizedBox(width: 8),
                   _SquareAction(
                     icon: LucideIcons.timer,
@@ -1224,6 +1312,21 @@ class _ExpandedRowState extends ConsumerState<_ExpandedRow> {
                 ],
               ],
             ),
+            if (t.isRest) ...[
+              const SizedBox(height: 9),
+              Row(
+                children: [
+                  Icon(LucideIcons.coffee, size: 13, color: c.textMuted),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Rest day — counts as neutral, your streak is safe.',
+                      style: context.t.meta.copyWith(color: c.textMuted),
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),
@@ -1327,6 +1430,263 @@ class _FocusTag extends StatelessWidget {
               letterSpacing: 0.9,
               color: fg,
               height: 1.0,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// STAYING CLEAN — negative ("avoid") habits in their own group.
+// Each day is clean by default; tapping a clean row logs a slip
+// (`completed:false`), tapping a broken row undoes it.
+// ════════════════════════════════════════════════════════════════════
+
+String _negDateKey(DateTime d) =>
+    '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+/// Consecutive clean days ending today for a negative habit — days with no
+/// logged slip — bounded by the earliest tracked day so a brand-new habit
+/// can't claim a huge streak.
+int _negativeCleanStreak(String habitId, List<HabitLog> logs, DateTime now) {
+  final mine = logs.where((l) => l.habitId == habitId).toList();
+  if (mine.isEmpty) return 0;
+  final slipDates = {for (final l in mine) if (!l.completed) l.date};
+  var earliest = mine.first.date;
+  for (final l in mine) {
+    if (l.date.compareTo(earliest) < 0) earliest = l.date;
+  }
+  final today = DateTime(now.year, now.month, now.day);
+  int streak = 0;
+  for (int i = 0; i < 400; i++) {
+    final key = _negDateKey(today.subtract(Duration(days: i)));
+    if (key.compareTo(earliest) < 0) break;
+    if (slipDates.contains(key)) break;
+    streak++;
+  }
+  return streak;
+}
+
+class _StayingCleanGroup extends ConsumerWidget {
+  final List<_TaskVM> tasks;
+  const _StayingCleanGroup({required this.tasks});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.c;
+    final recent =
+        ref.watch(recentHabitLogsProvider).valueOrNull ?? const <HabitLog>[];
+    final now = DateTime.now();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 10),
+        Row(
+          children: [
+            Icon(LucideIcons.shieldOff, size: 13, color: c.negative),
+            const SizedBox(width: 7),
+            Text('STAYING CLEAN',
+                style: AppType.overline
+                    .copyWith(color: c.textMuted, letterSpacing: 1.3)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        for (final t in tasks) ...[
+          _NegativeRow(
+              task: t, cleanStreak: _negativeCleanStreak(t.id, recent, now)),
+          const SizedBox(height: 8),
+        ],
+      ],
+    );
+  }
+}
+
+class _NegativeRow extends ConsumerWidget {
+  final _TaskVM task;
+  final int cleanStreak;
+  const _NegativeRow({required this.task, required this.cleanStreak});
+
+  bool get _broke => task.logRef != null && !task.logRef!.completed;
+
+  String _dateKey(WidgetRef ref) => _negDateKey(ref.read(selectedDateProvider));
+
+  Future<void> _setBroke(WidgetRef ref, bool broke) =>
+      ref.read(habitActionsProvider.notifier).toggleHabit(
+            task.id,
+            _dateKey(ref),
+            completed: !broke,
+          );
+
+  Future<void> _onTap(BuildContext context, WidgetRef ref) async {
+    if (_broke) {
+      HapticFeedback.selectionClick();
+      await _setBroke(ref, false); // undo → clean
+      return;
+    }
+    final slip = await showModalBottomSheet<bool>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _SlipSheet(name: task.name),
+    );
+    if (slip != true) return;
+    HapticFeedback.mediumImpact();
+    await _setBroke(ref, true);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        behavior: SnackBarBehavior.floating,
+        content: Text('Slip logged · ${task.name}'),
+        action:
+            SnackBarAction(label: 'Undo', onPressed: () => _setBroke(ref, false)),
+      ));
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.c;
+    final broke = _broke;
+    final accent = c.negative;
+    return PressableScale(
+      onTap: () => _onTap(context, ref),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 11, 12, 11),
+        decoration: BoxDecoration(
+          color: broke ? accent.withValues(alpha: 0.08) : c.surface,
+          borderRadius: BorderRadius.circular(AppRadii.card),
+          border: Border.all(
+            color: broke ? accent.withValues(alpha: 0.5) : c.border,
+            width: 0.5,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: accent.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Icon(LucideIcons.ban, size: 16, color: accent),
+            ),
+            const SizedBox(width: 11),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    task.name,
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: c.textPrimary,
+                      decoration: broke ? TextDecoration.lineThrough : null,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    broke
+                        ? 'Broke today · tap to undo'
+                        : cleanStreak > 0
+                            ? '$cleanStreak ${cleanStreak == 1 ? "day" : "days"} clean'
+                            : 'Clean today',
+                    style: AppType.meta.copyWith(
+                      color: broke ? accent : c.textMuted,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (broke)
+              Icon(LucideIcons.rotateCcw, size: 18, color: accent)
+            else
+              Container(
+                width: 26,
+                height: 26,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: c.positive.withValues(alpha: 0.14),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(LucideIcons.check, size: 15, color: c.positive),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Confirm sheet shown before logging a slip on a negative habit.
+class _SlipSheet extends StatelessWidget {
+  final String name;
+  const _SlipSheet({required this.name});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Container(
+      decoration: BoxDecoration(
+        color: c.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: EdgeInsets.fromLTRB(
+          20, 12, 20, 18 + MediaQuery.of(context).viewPadding.bottom),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: c.border,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          Icon(LucideIcons.alertTriangle, size: 30, color: c.negative),
+          const SizedBox(height: 12),
+          Text('Log a slip?', style: context.t.h2),
+          const SizedBox(height: 6),
+          Text(
+            'Marks today broken for “$name” and resets your clean streak. '
+            'It costs points — but you can undo.',
+            textAlign: TextAlign.center,
+            style: AppType.meta.copyWith(color: c.textMuted, height: 1.4),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: c.negative,
+                minimumSize: const Size.fromHeight(46),
+              ),
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('I slipped',
+                  style: TextStyle(
+                      fontFamily: 'Inter', fontWeight: FontWeight.w700)),
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text('Stayed clean',
+                  style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontWeight: FontWeight.w700,
+                      color: c.textSecondary)),
             ),
           ),
         ],

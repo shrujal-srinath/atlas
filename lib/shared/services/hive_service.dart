@@ -34,6 +34,10 @@ class HiveService {
   /// `water_logs` keyed by date. TTL: 24h.
   static const waterLogsBox = 'water_logs_cache';
 
+  /// Local to-do lists, keyed by date. Key: `byDate:yyyy-mm-dd` → list of todo
+  /// json. Local-first (no server table yet); forever.
+  static const todosBox = 'todos';
+
   /// Outbound sync queue. List of pending mutations.
   /// Key: `pending` → list of `{id, op, table, payload, ts, retries}` maps.
   static const syncQueueBox = 'sync_queue';
@@ -52,6 +56,7 @@ class HiveService {
     habitLogsBox,
     weightLogsBox,
     waterLogsBox,
+    todosBox,
     syncQueueBox,
   ];
 

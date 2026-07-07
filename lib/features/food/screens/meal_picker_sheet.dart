@@ -5,6 +5,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/models.dart';
 import '../domain/meal_entry.dart';
+import '../domain/meal_targets.dart';
 import '../providers/food_providers.dart';
 
 /// "Which meal would you like to track?" — the picker shown when the user taps
@@ -19,7 +20,7 @@ class MealPickerSheet extends ConsumerWidget {
     final t = context.t;
     final entries =
         ref.watch(diaryEntriesProvider).valueOrNull ?? const <MealEntry>[];
-    final targets = ref.watch(mealTargetsProvider);
+    final targets = ref.watch(mealMacroTargetsProvider);
 
     final consumed = <MealTimeSlot, double>{
       for (final s in kDiarySlotOrder) s: 0,
@@ -72,7 +73,7 @@ class MealPickerSheet extends ConsumerWidget {
 class _MealRow extends StatelessWidget {
   final MealTimeSlot slot;
   final double consumed;
-  final int? target;
+  final MealMacroTargets? target;
   final VoidCallback onTap;
   const _MealRow({
     required this.slot,
@@ -84,6 +85,7 @@ class _MealRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final kcal = target?.kcal;
     return InkWell(
       onTap: onTap,
       child: Padding(
@@ -92,7 +94,7 @@ class _MealRow extends StatelessWidget {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 14),
+              padding: const EdgeInsets.symmetric(vertical: 12),
               child: Row(
                 children: [
                   Expanded(
@@ -105,12 +107,26 @@ class _MealRow extends StatelessWidget {
                       ),
                     ),
                   ),
-                  Text(
-                    target != null
-                        ? '${consumed.round()} of $target kcal'
-                        : '${consumed.round()} kcal',
-                    style: AppType.numMd.copyWith(
-                        color: c.textMuted, fontSize: 13.5),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        kcal != null
+                            ? '${consumed.round()} of $kcal kcal'
+                            : '${consumed.round()} kcal',
+                        style: AppType.numMd.copyWith(
+                            color: c.textMuted, fontSize: 13.5),
+                      ),
+                      if (target != null && target!.hasMacros) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          'P${target!.proteinG} · C${target!.carbsG} · F${target!.fatG}',
+                          style: AppType.meta
+                              .copyWith(color: c.textDim, fontSize: 11),
+                        ),
+                      ],
+                    ],
                   ),
                   const SizedBox(width: 14),
                   Icon(LucideIcons.plus, size: 20, color: c.accent),

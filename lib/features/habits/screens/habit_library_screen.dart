@@ -8,6 +8,7 @@ import '../../../core/utils/error_messages.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../core/utils/streak_engine.dart';
 import '../../../shared/models/models.dart';
+import '../../home/scoring/section_def.dart';
 import '../../../shared/services/notification_service.dart';
 import '../../../shared/widgets/atlas_empty.dart';
 import '../providers/habit_provider.dart';
@@ -50,10 +51,13 @@ class _HabitLibraryScreenState extends ConsumerState<HabitLibraryScreen> {
       body: habitsAsync.when(
         data: (habits) => _buildBody(context, habits),
         loading: () => Center(
-            child: CircularProgressIndicator(color: c.accent, strokeWidth: 2)),
+          child: CircularProgressIndicator(color: c.accent, strokeWidth: 2),
+        ),
         error: (e, _) => Center(
-          child: Text(friendlyError(e),
-              style: TextStyle(color: c.negative, fontSize: 13)),
+          child: Text(
+            friendlyError(e),
+            style: TextStyle(color: c.negative, fontSize: 13),
+          ),
         ),
       ),
     );
@@ -70,12 +74,16 @@ class _HabitLibraryScreenState extends ConsumerState<HabitLibraryScreen> {
 
     final bySection = <HabitSection, List<Habit>>{
       for (final s in HabitSection.values)
-        s: active.where((h) => h.section == s).toList(),
+        s: active.where((h) => h.sectionId.toSectionEnum() == s).toList(),
     };
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(
-          AppSpace.screenH, 12, AppSpace.screenH, 32),
+        AppSpace.screenH,
+        12,
+        AppSpace.screenH,
+        32,
+      ),
       children: [
         _LibrarySummary(active: active, archived: archived),
         const SizedBox(height: 18),
@@ -96,16 +104,16 @@ class _HabitLibraryScreenState extends ConsumerState<HabitLibraryScreen> {
                 children: [
                   Icon(LucideIcons.archive, size: 14, color: c.textMuted),
                   const SizedBox(width: 8),
-                  Text(
-                    'Archived · ${archived.length}',
-                    style: t.label,
-                  ),
+                  Text('Archived · ${archived.length}', style: t.label),
                   const Spacer(),
                   AnimatedRotation(
                     turns: _showArchived ? 0.5 : 0,
                     duration: const Duration(milliseconds: 180),
-                    child: Icon(LucideIcons.chevronDown,
-                        size: 18, color: c.textMuted),
+                    child: Icon(
+                      LucideIcons.chevronDown,
+                      size: 18,
+                      color: c.textMuted,
+                    ),
                   ),
                 ],
               ),
@@ -262,7 +270,7 @@ class _SectionHeader extends StatelessWidget {
     final c = context.c;
     final t = context.t;
     final color = section.color(c);
-    final label = section.name[0].toUpperCase() + section.name.substring(1);
+    final label = section.label;
     return Row(
       children: [
         Container(
@@ -271,8 +279,7 @@ class _SectionHeader extends StatelessWidget {
           decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 8),
-        Text(label.toUpperCase(),
-            style: t.label.copyWith(letterSpacing: 0.8)),
+        Text(label.toUpperCase(), style: t.label.copyWith(letterSpacing: 0.8)),
         const SizedBox(width: 8),
         Text('· $count', style: t.meta),
       ],
@@ -291,11 +298,8 @@ class _ReorderableHabitList extends ConsumerWidget {
       physics: const NeverScrollableScrollPhysics(),
       buildDefaultDragHandles: false,
       itemCount: habits.length,
-      itemBuilder: (ctx, i) => _HabitRow(
-        key: ValueKey(habits[i].id),
-        habit: habits[i],
-        index: i,
-      ),
+      itemBuilder: (ctx, i) =>
+          _HabitRow(key: ValueKey(habits[i].id), habit: habits[i], index: i),
       onReorder: (oldIndex, newIndex) async {
         HapticFeedback.mediumImpact();
         if (newIndex > oldIndex) newIndex -= 1;
@@ -307,10 +311,8 @@ class _ReorderableHabitList extends ConsumerWidget {
             .read(habitActionsProvider.notifier)
             .reorderHabits(reordered.map((h) => h.id).toList());
       },
-      proxyDecorator: (child, _, _) => Material(
-        color: Colors.transparent,
-        child: child,
-      ),
+      proxyDecorator: (child, _, _) =>
+          Material(color: Colors.transparent, child: child),
     );
   }
 }
@@ -324,7 +326,7 @@ class _HabitRow extends ConsumerWidget {
     if (habit.colorKey != null && kHabitColorSwatch[habit.colorKey] != null) {
       return Color(kHabitColorSwatch[habit.colorKey]!);
     }
-    return habit.section.color(context.c);
+    return habit.sectionId.sectionColor(context.c);
   }
 
   @override
@@ -355,19 +357,18 @@ class _HabitRow extends ConsumerWidget {
               Text(
                 'Archive',
                 style: TextStyle(
-                    fontFamily: 'Inter',
-                    color: c.negative,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600),
+                  fontFamily: 'Inter',
+                  color: c.negative,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ],
           ),
         ),
         confirmDismiss: (_) async {
           HapticFeedback.mediumImpact();
-          await ref
-              .read(habitActionsProvider.notifier)
-              .deleteHabit(habit.id);
+          await ref.read(habitActionsProvider.notifier).deleteHabit(habit.id);
           await NotificationService.instance.cancelHabit(habit.id);
           return true;
         },
@@ -390,8 +391,7 @@ class _HabitRow extends ConsumerWidget {
             ),
             foregroundDecoration: BoxDecoration(
               borderRadius: BorderRadius.circular(AppRadii.card),
-              border: Border(
-                  left: BorderSide(color: accent, width: 3)),
+              border: Border(left: BorderSide(color: accent, width: 3)),
             ),
             child: Row(
               children: [
@@ -402,8 +402,7 @@ class _HabitRow extends ConsumerWidget {
                     color: accent.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(AppRadii.chip),
                   ),
-                  child: Icon(habitIcon(habit.icon),
-                      size: 18, color: accent),
+                  child: Icon(habitIcon(habit.icon), size: 18, color: accent),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -433,14 +432,37 @@ class _HabitRow extends ConsumerWidget {
                       color: c.amber,
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 6),
                 ],
+                // Direct edit — opens the habit editor (row-tap still → detail).
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    context.push('/habit-creation', extra: habit);
+                  },
+                  child: Container(
+                    width: 40,
+                    height: 40,
+                    alignment: Alignment.center,
+                    child: Icon(
+                      LucideIcons.pencil,
+                      size: 16,
+                      color: c.textMuted,
+                    ),
+                  ),
+                ),
                 ReorderableDragStartListener(
                   index: index,
-                  child: Padding(
-                    padding: const EdgeInsets.all(4),
-                    child: Icon(LucideIcons.gripVertical,
-                        size: 16, color: c.textDim),
+                  child: Container(
+                    width: 36,
+                    height: 40,
+                    alignment: Alignment.center,
+                    child: Icon(
+                      LucideIcons.gripVertical,
+                      size: 16,
+                      color: c.textDim,
+                    ),
                   ),
                 ),
               ],

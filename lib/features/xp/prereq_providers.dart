@@ -72,9 +72,17 @@ final prereqProgressProvider =
   final now = DateTime.now();
   final today = DateTime(now.year, now.month, now.day);
 
+  // Which linked habits are negatives — so the derivation counts "clean days"
+  // (no slip) instead of completions.
+  final habits = await ref.watch(habitsProvider.future);
+  final negativeIds = <String>{
+    for (final h in habits)
+      if (h.type == HabitType.negative) h.id,
+  };
+
   final results = <PrereqProgress>[];
   for (final d in defs) {
-    final current = await _progressFor(ref, d);
+    final current = await _progressFor(ref, d, negativeIds);
     final isMet = d.target > 0 && current >= d.target;
     int? daysLeft;
     final dl = d.deadline;
@@ -112,15 +120,17 @@ final canLevelUpProvider = FutureProvider<bool>((ref) async {
 // progress derivation
 // ────────────────────────────────────────────────────────────────────
 
-Future<int> _progressFor(Ref ref, LevelPrereq def) async {
+Future<int> _progressFor(Ref ref, LevelPrereq def, Set<String> negativeIds) async {
   // When a timeframe is set, only count activity on/after the start day.
   final since = def.hasWindow ? _dateKey(def.startedAt!) : null;
+  final isNeg = def.habitId != null && negativeIds.contains(def.habitId);
   switch (def.kind) {
     case PrereqKind.habitCompletions:
-      return _habitCompletionCount(ref, def.habitId, since);
+      return _habitCompletionCount(ref, def.habitId, since, isNeg);
     case PrereqKind.streakDays:
       // A streak is inherently "current run"; the timeframe is a deadline only.
-      return _currentStreakFor(ref, def.habitId);
+      // For a negative, the "streak" is consecutive clean (no-slip) days.
+      return _currentStreakFor(ref, def.habitId, isNeg);
     case PrereqKind.perfectDays:
       return _perfectDaysCount(ref, def.scoreThreshold, since);
     case PrereqKind.nutritionDays:
@@ -131,8 +141,47 @@ Future<int> _progressFor(Ref ref, LevelPrereq def) async {
 String _dateKey(DateTime d) =>
     '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
-Future<int> _habitCompletionCount(Ref ref, String? habitId, String? since) async {
+Future<int> _habitCompletionCount(
+    Ref ref, String? habitId, String? since, bool isNegative) async {
   if (habitId == null) return 0;
+
+  // Negative: "completions" = clean days (no slip) over the window.
+  if (isNegative) {
+    final today = _todayDate();
+    if (ref.read(devModeProvider)) {
+      int count = 0;
+      for (int i = _kPrereqScanDays; i >= 0; i--) {
+        final d = today.subtract(Duration(days: i));
+        final key = _dateKey(d);
+        if (since != null && key.compareTo(since) < 0) continue;
+        final logs = await ref.read(habitLogsForDateProvider(key).future);
+        if (!logs.any((l) => l.habitId == habitId && !l.completed)) count++;
+      }
+      return count;
+    }
+    final session = ref.read(sessionProvider);
+    if (session == null) return 0;
+    final start = since != null
+        ? DateTime.parse(since)
+        : today.subtract(const Duration(days: _kPrereqScanDays));
+    final elapsed =
+        today.difference(DateTime(start.year, start.month, start.day)).inDays + 1;
+    int slipDays = 0;
+    try {
+      var q = SupabaseService.client
+          .from('habit_logs')
+          .select('date')
+          .eq('user_id', session.user.id)
+          .eq('habit_id', habitId)
+          .eq('completed', false);
+      if (since != null) q = q.gte('date', since);
+      final rows = await q;
+      slipDays = (rows as List).map((r) => r['date'] as String).toSet().length;
+    } catch (_) {}
+    final clean = elapsed - slipDays;
+    return clean < 0 ? 0 : clean;
+  }
+
   if (ref.read(devModeProvider)) {
     final today = DateTime.now();
     int count = 0;
@@ -163,9 +212,10 @@ Future<int> _habitCompletionCount(Ref ref, String? habitId, String? since) async
   }
 }
 
-Future<int> _currentStreakFor(Ref ref, String? habitId) async {
+Future<int> _currentStreakFor(Ref ref, String? habitId, bool isNegative) async {
   if (habitId == null) return 0;
-  // Walk back from today; count consecutive days the habit was completed.
+  // Walk back from today. Positive: consecutive *completed* days. Negative:
+  // consecutive *clean* days (no logged slip) — a slip resets the clean streak.
   final today = DateTime.now();
   int streak = 0;
   for (int i = 0; i < _kPrereqScanDays; i++) {
@@ -173,13 +223,15 @@ Future<int> _currentStreakFor(Ref ref, String? habitId) async {
     final key =
         '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
     final logs = await ref.read(habitLogsForDateProvider(key).future);
-    final done = logs.any((l) => l.habitId == habitId && l.completed);
-    if (done) {
+    final ok = isNegative
+        ? !logs.any((l) => l.habitId == habitId && !l.completed) // no slip
+        : logs.any((l) => l.habitId == habitId && l.completed);
+    if (ok) {
       streak++;
     } else {
-      // Allow today to be incomplete without breaking the streak yet (the day
-      // is in progress) — but break on any past day.
-      if (i == 0) continue;
+      // Positive today-incomplete is in-progress grace; a negative slip (even
+      // today) breaks the clean run immediately.
+      if (!isNegative && i == 0) continue;
       break;
     }
   }

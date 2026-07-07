@@ -2,16 +2,29 @@ import '../../shared/models/models.dart';
 
 /// Walks backwards from yesterday, counting consecutive scheduled+completed days.
 /// Non-scheduled days are skipped. A scheduled day with no completed log breaks the streak.
-int calculateStreak(Habit habit, List<HabitLog> recentLogs) {
+///
+/// [now] overrides "today" (defaults to the real clock) so callers like
+/// `computeTaskStats` stay fully deterministic/testable — mirrors
+/// [dailyScoreStreak]'s `today` parameter.
+int calculateStreak(Habit habit, List<HabitLog> recentLogs, {DateTime? now}) {
   int streak = 0;
-  final now = DateTime.now();
-  var check = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 1));
+  final ref = now ?? DateTime.now();
+  var check = DateTime(ref.year, ref.month, ref.day).subtract(const Duration(days: 1));
 
   for (int i = 0; i < 60; i++) {
     if (habit.daysOfWeek.contains(check.weekday)) {
       final ds =
           '${check.year}-${check.month.toString().padLeft(2, '0')}-${check.day.toString().padLeft(2, '0')}';
-      final hit = recentLogs.any((l) => l.habitId == habit.id && l.date == ds && l.completed);
+      final dayLogs =
+          recentLogs.where((l) => l.habitId == habit.id && l.date == ds);
+      // A deliberate rest day is neutral — skip it without breaking the run
+      // (mirrors a non-scheduled day). Essential for flexible "X / week" habits
+      // that are "scheduled" all 7 days but only done on some.
+      if (dayLogs.any((l) => l.restDay)) {
+        check = check.subtract(const Duration(days: 1));
+        continue;
+      }
+      final hit = dayLogs.any((l) => l.completed);
       if (hit) {
         streak++;
       } else {

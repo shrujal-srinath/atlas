@@ -68,6 +68,13 @@ class MeHubScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 10),
             _HubTile(
+              icon: LucideIcons.listChecks,
+              title: 'To-do',
+              sub: 'Day-to-day tasks by date',
+              onTap: () => context.push('/todo'),
+            ),
+            const SizedBox(height: 10),
+            _HubTile(
               icon: LucideIcons.bookOpen,
               title: 'Journal',
               sub: 'Goals, wellness & reflection',

@@ -16,7 +16,7 @@ Habit _habit({
       userId: 'u1',
       name: 'Stretch',
       icon: 'activity',
-      section: HabitSection.athletic,
+      sectionId: 'athletic',
       type: HabitType.positive,
       daysOfWeek: daysOfWeek,
       effortRatingEnabled: false,

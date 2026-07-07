@@ -163,6 +163,24 @@ class OffClient {
     );
 
     final brand = (p['brands'] as String?)?.split(',').first.trim();
+
+    // Packaged items should default to their package serving, not a generic
+    // "Bowl". OFF carries `serving_quantity` (usually grams) for most products;
+    // fall back to a 50 g pack so a scanned snack still reads "1 Pack", never
+    // "1 Bowl (200 g)". Mirrors FoodRepository._cacheBranded so the live scan
+    // and the cached row agree.
+    final servRaw = p['serving_quantity'];
+    final servQ = servRaw is num
+        ? servRaw.toDouble()
+        : double.tryParse(servRaw?.toString() ?? '');
+    final measures = <FoodMeasure>[
+      const FoodMeasure('g', 1),
+      if (servQ != null && servQ > 1 && servQ < 2000)
+        FoodMeasure('Serving', servQ)
+      else
+        const FoodMeasure('Pack', 50),
+    ];
+
     return Food(
       id: 'off:${p['code']}',
       userId: null,
@@ -173,6 +191,7 @@ class OffClient {
       servingQty: 100,
       servingUnit: 'g',
       per: per,
+      measures: measures,
       isFavorite: false,
     );
   }

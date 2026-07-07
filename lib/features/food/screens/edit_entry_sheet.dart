@@ -321,7 +321,7 @@ class _SlotChip extends StatelessWidget {
                 fontFamily: 'Inter',
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: active ? c.accent : c.textSecondary)),
+                color: active ? c.textPrimary : c.textSecondary)),
       ),
     );
   }

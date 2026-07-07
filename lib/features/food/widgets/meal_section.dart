@@ -4,8 +4,10 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/models/models.dart';
 import '../domain/meal_entry.dart';
+import '../food_colors.dart';
 import '../providers/food_providers.dart';
 import '../providers/health_score_providers.dart';
+import 'food_score_info_sheet.dart';
 import 'health_score_chip.dart';
 import 'quick_log_chips.dart';
 
@@ -41,7 +43,9 @@ class MealSection extends ConsumerWidget {
     final c = context.c;
     final score = ref.watch(mealHealthScoreProvider(slot));
     final tint = _tintFor(c, slot);
-    final target = ref.watch(mealTargetsProvider)[slot];
+    final mealName = ref.watch(mealPlanProvider).forSlot(slot).name;
+    final macroTarget = ref.watch(mealMacroTargetsProvider)[slot];
+    final target = macroTarget?.kcal;
     final kcal = entries.fold<double>(0, (a, e) => a + e.totals.kcal);
     final isEmpty = entries.isEmpty;
 
@@ -76,7 +80,7 @@ class MealSection extends ConsumerWidget {
                       children: [
                         Flexible(
                           child: Text(
-                            slot.label,
+                            mealName,
                             style: const TextStyle(
                               fontFamily: 'Inter',
                               fontSize: 15.5,
@@ -89,18 +93,35 @@ class MealSection extends ConsumerWidget {
                         ),
                         if (entries.isNotEmpty) ...[
                           const SizedBox(width: 8),
-                          HealthScoreChip(score: score),
+                          HealthScoreChip(
+                            score: score,
+                            onTap: () => FoodScoreInfoSheet.show(context),
+                          ),
                         ],
                       ],
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text(
-                    target != null
-                        ? '${kcal.round()} of $target Cal'
-                        : '${kcal.round()} Cal',
-                    style: AppType.numMd.copyWith(
-                        color: c.textMuted, fontSize: 12.5),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        target != null
+                            ? '${kcal.round()} of $target Cal'
+                            : '${kcal.round()} Cal',
+                        style: AppType.numMd.copyWith(
+                            color: c.textMuted, fontSize: 12.5),
+                      ),
+                      if (macroTarget != null && macroTarget.hasMacros) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          'P${macroTarget.proteinG} · C${macroTarget.carbsG} · F${macroTarget.fatG}',
+                          style: AppType.meta.copyWith(
+                              color: c.textDim, fontSize: 10.5),
+                        ),
+                      ],
+                    ],
                   ),
                   const SizedBox(width: 8),
                   _AddButton(tint: tint, onTap: onAdd),
@@ -307,11 +328,11 @@ class _EntryRow extends StatelessWidget {
                   const SizedBox(height: 5),
                   Row(
                     children: [
-                      _MacroChip(label: 'P', value: n.proteinG, color: c.athletic),
+                      _MacroChip(label: 'P', value: n.proteinG, color: c.proteinColor),
                       const SizedBox(width: 5),
-                      _MacroChip(label: 'C', value: n.carbsG, color: c.amber),
+                      _MacroChip(label: 'C', value: n.carbsG, color: c.carbsColor),
                       const SizedBox(width: 5),
-                      _MacroChip(label: 'F', value: n.fatG, color: c.mind),
+                      _MacroChip(label: 'F', value: n.fatG, color: c.fatColor),
                     ],
                   ),
                 ],

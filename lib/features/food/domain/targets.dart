@@ -1,4 +1,5 @@
 import 'food.dart';
+import 'nutrition_engine.dart';
 
 /// Daily targets the diary compares against.
 ///
@@ -60,6 +61,41 @@ class DailyTargets {
         vitAUg: micros.vitAUg, vitCMg: micros.vitCMg,
         vitDUg: micros.vitDUg, vitEMg: micros.vitEMg, vitKUg: micros.vitKUg,
         b6Mg: micros.b6Mg, b12Ug: micros.b12Ug, folateUg: micros.folateUg,
+      ),
+    );
+  }
+
+  /// Build targets from a fully-computed [NutritionPlan] (the engine). Macros
+  /// already sum to the calorie total; micros come from the demographic DRI
+  /// table, upper-bound nutrients from the calorie-aware caps.
+  factory DailyTargets.fromPlan(NutritionPlan p) {
+    double rda(String k, double d) => p.micros[k] ?? d;
+    double cap(String k, double d) => p.microCaps[k] ?? d;
+    return DailyTargets(
+      kcal: p.kcal.toDouble(),
+      proteinG: p.proteinG.toDouble(),
+      carbsG: p.carbsG.toDouble(),
+      fatG: p.fatG.toDouble(),
+      micros: Nutrients(
+        fiberG: p.fiberG.toDouble(),
+        sugarG: cap('sugar_g', 50),
+        satFatG: cap('sat_fat_g', 25),
+        transFatG: cap('trans_fat_g', 2),
+        cholesterolMg: cap('cholesterol_mg', 300),
+        sodiumMg: cap('sodium_mg', 2300),
+        potassiumMg: rda('potassium_mg', 3500),
+        calciumMg: rda('calcium_mg', 1000),
+        ironMg: rda('iron_mg', 18),
+        magnesiumMg: rda('magnesium_mg', 400),
+        zincMg: rda('zinc_mg', 11),
+        vitAUg: rda('vit_a_ug', 900),
+        vitCMg: rda('vit_c_mg', 90),
+        vitDUg: rda('vit_d_ug', 15),
+        vitEMg: rda('vit_e_mg', 15),
+        vitKUg: rda('vit_k_ug', 120),
+        b6Mg: rda('b6_mg', 1.3),
+        b12Ug: rda('b12_ug', 2.4),
+        folateUg: rda('folate_ug', 400),
       ),
     );
   }

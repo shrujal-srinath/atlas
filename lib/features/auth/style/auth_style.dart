@@ -86,7 +86,7 @@ class AuthType {
   static const label = TextStyle(
     fontFamily: 'Inter',
     fontSize: 12.5,
-    fontWeight: FontWeight.w600,
+    fontWeight: FontWeight.w700,
     letterSpacing: 0.2,
     color: AuthColors.inkSecondary,
   );

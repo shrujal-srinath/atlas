@@ -23,6 +23,9 @@ class _TaskVM {
   final String name;
   final String time;
   final String cat;
+  /// The habit's own colour key (e.g. 'teal') — drives a subtle tint on the
+  /// card (icon + ring). Null falls back to the section colour.
+  final String? colorKey;
   final String type;
   final int? duration;
   final double? target;
@@ -43,6 +46,7 @@ class _TaskVM {
     required this.name,
     required this.time,
     required this.cat,
+    this.colorKey,
     required this.type,
     this.duration,
     this.target,
@@ -68,6 +72,13 @@ class _TaskVM {
   }
 
   bool get isNumeric => target != null && target! > 0;
+
+  /// Deliberate rest day for this task (flexible "X / week" habits) — neutral.
+  bool get isRest => logRef?.restDay == true;
+
+  /// True for a flexible weekly-count habit — the only kind that offers rests.
+  bool get isFlexibleCount =>
+      habitRef?.frequencyMode == FrequencyMode.timesPerWeek;
 }
 
 const _kPeriods = ['MORNING', 'AFTERNOON', 'EVENING', 'NIGHT'];
@@ -149,7 +160,8 @@ _TaskVM _homeTaskToMock(HomeTask t) {
     period: t.period,
     name: h.name,
     time: t.time,
-    cat: _catKeyFor(h.section),
+    cat: _catKeyFor(h.sectionId.toSectionEnum()),
+    colorKey: h.colorKey,
     type: type,
     duration: h.goalType == GoalType.durationMin ? h.goalValue?.toInt() : null,
     target: isNumeric ? h.goalValue : null,
@@ -160,22 +172,21 @@ _TaskVM _homeTaskToMock(HomeTask t) {
     priority: h.priority,
     habitRef: h,
     logRef: t.log,
-    unitLabel: h.goalType == null ? null : _unitLabelFor(h.goalType!),
+    unitLabel: h.goalType == null ? null : goalUnitLabel(h.goalType!, h.goalUnit),
   );
 }
 
-String _unitLabelFor(GoalType t) => switch (t) {
-      GoalType.reps => 'reps',
-      GoalType.durationMin => 'min',
-      GoalType.distanceKm => 'km',
-      GoalType.litres => 'L',
-      GoalType.custom => '',
-    };
+/// A task card's accent — the habit's own colour when set, else the section
+/// colour. Kept subtle on the card (icon + ring), per the home design.
+Color _habitColorFor(BuildContext context, _TaskVM t) {
+  final swatch = t.colorKey == null ? null : kHabitColorSwatch[t.colorKey!];
+  return swatch != null ? Color(swatch) : _catColor(context, t.cat);
+}
 
 String _catName(String key) => switch (key) {
-      'ATH' => 'Athletic',
-      'MIND' => 'Mind',
-      'BODY' => 'Body',
+      'ATH' => HabitSection.athletic.label,
+      'MIND' => HabitSection.mind.label,
+      'BODY' => HabitSection.body.label,
       _ => '',
     };
 
@@ -184,12 +195,3 @@ IconData _periodIcon(String p) => switch (p) {
       'AFTERNOON' => LucideIcons.sun,
       _ => LucideIcons.moon,
     };
-
-String _greetingFor(DateTime now) {
-  final h = now.hour;
-  if (h < 5) return 'Still up';
-  if (h < 12) return 'Good morning';
-  if (h < 17) return 'Good afternoon';
-  if (h < 21) return 'Good evening';
-  return 'Good night';
-}

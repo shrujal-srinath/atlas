@@ -36,21 +36,21 @@ List<Habit> get mockHabits => const [
       // Morning — Athletic
       Habit(
         id: 'h1', userId: _uid, name: 'Morning Run',
-        icon: 'run', section: HabitSection.athletic, type: HabitType.positive,
+        icon: 'run', sectionId: 'athletic', type: HabitType.positive,
         daysOfWeek: _allDays, goalValue: 30, goalType: GoalType.durationMin,
         effortRatingEnabled: true, noteEnabled: false, isArchived: false,
         timePeriod: TimePeriod.morning, scheduledTime: '06:30',
       ),
       Habit(
         id: 'h2', userId: _uid, name: 'Strength Training',
-        icon: 'dumbbell', section: HabitSection.athletic, type: HabitType.positive,
+        icon: 'dumbbell', sectionId: 'athletic', type: HabitType.positive,
         daysOfWeek: [1, 3, 5], goalValue: 45, goalType: GoalType.durationMin,
         effortRatingEnabled: true, noteEnabled: true, isArchived: false,
         timePeriod: TimePeriod.morning, scheduledTime: '07:15',
       ),
       Habit(
         id: 'h3', userId: _uid, name: 'Stretching',
-        icon: 'stretch', section: HabitSection.athletic, type: HabitType.positive,
+        icon: 'stretch', sectionId: 'athletic', type: HabitType.positive,
         daysOfWeek: _allDays, goalValue: 15, goalType: GoalType.durationMin,
         effortRatingEnabled: false, noteEnabled: false, isArchived: false,
         timePeriod: TimePeriod.morning, scheduledTime: '08:00',
@@ -59,7 +59,7 @@ List<Habit> get mockHabits => const [
       // Afternoon — Building
       Habit(
         id: 'h4', userId: _uid, name: 'Deep Work — Code',
-        icon: 'code', section: HabitSection.mind, type: HabitType.positive,
+        icon: 'code', sectionId: 'mind', type: HabitType.positive,
         daysOfWeek: [1, 2, 3, 4, 5], goalValue: 90, goalType: GoalType.durationMin,
         effortRatingEnabled: true, noteEnabled: true, isArchived: false,
         timePeriod: TimePeriod.afternoon, scheduledTime: '13:00',
@@ -67,7 +67,7 @@ List<Habit> get mockHabits => const [
       ),
       Habit(
         id: 'h5', userId: _uid, name: 'Read',
-        icon: 'book', section: HabitSection.mind, type: HabitType.positive,
+        icon: 'book', sectionId: 'mind', type: HabitType.positive,
         daysOfWeek: _allDays, goalValue: 20, goalType: GoalType.durationMin,
         effortRatingEnabled: false, noteEnabled: true, isArchived: false,
         timePeriod: TimePeriod.afternoon, scheduledTime: '15:00',
@@ -77,21 +77,21 @@ List<Habit> get mockHabits => const [
       // Evening — Breaking + Athletic
       Habit(
         id: 'h6', userId: _uid, name: 'No Phone After 10',
-        icon: 'phone', section: HabitSection.body, type: HabitType.negative,
+        icon: 'phone', sectionId: 'body', type: HabitType.negative,
         daysOfWeek: _allDays,
         effortRatingEnabled: false, noteEnabled: false, isArchived: false,
         timePeriod: TimePeriod.evening, scheduledTime: '22:00',
       ),
       Habit(
         id: 'h7', userId: _uid, name: 'Ice Bath',
-        icon: 'snowflake', section: HabitSection.athletic, type: HabitType.positive,
+        icon: 'snowflake', sectionId: 'athletic', type: HabitType.positive,
         daysOfWeek: [1, 3, 5, 7], goalValue: 3, goalType: GoalType.durationMin,
         effortRatingEnabled: true, noteEnabled: false, isArchived: false,
         timePeriod: TimePeriod.evening, scheduledTime: '20:00',
       ),
       Habit(
         id: 'h8', userId: _uid, name: 'No Junk Food',
-        icon: 'pizza', section: HabitSection.body, type: HabitType.negative,
+        icon: 'pizza', sectionId: 'body', type: HabitType.negative,
         daysOfWeek: _allDays,
         effortRatingEnabled: false, noteEnabled: false, isArchived: false,
         timePeriod: TimePeriod.evening,

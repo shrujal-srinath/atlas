@@ -9,6 +9,7 @@ import '../../../core/utils/error_messages.dart';
 import '../../../core/theme/app_icons.dart';
 import '../../../core/utils/streak_engine.dart';
 import '../../../shared/models/models.dart';
+import '../../home/scoring/section_def.dart';
 import '../../../shared/services/notification_service.dart';
 import '../../food/domain/meal_entry.dart'; // MealTimeSlotX.label
 import '../models/habit_food_link.dart';
@@ -63,7 +64,7 @@ class _Body extends ConsumerWidget {
     if (habit.colorKey != null && kHabitColorSwatch[habit.colorKey] != null) {
       return Color(kHabitColorSwatch[habit.colorKey]!);
     }
-    return habit.section.color(context.c);
+    return habit.sectionId.sectionColor(context.c);
   }
 
   ({int current, int best, double rate30d, double trendDelta, double health})
@@ -78,7 +79,9 @@ class _Body extends ConsumerWidget {
     int run = 0;
     for (int i = 0; i < 365; i++) {
       final day = start.subtract(Duration(days: i));
-      if (!habit.daysOfWeek.contains(day.weekday)) continue;
+      if (!habit.existedOn(day) || !habit.daysOfWeek.contains(day.weekday)) {
+        continue;
+      }
       final ds = _fmt(day);
       final hit = recent
           .any((l) => l.habitId == habit.id && l.date == ds && l.completed);
@@ -94,7 +97,9 @@ class _Body extends ConsumerWidget {
     int sched30 = 0, done30 = 0;
     for (int i = 0; i < 30; i++) {
       final day = start.subtract(Duration(days: i));
-      if (!habit.daysOfWeek.contains(day.weekday)) continue;
+      if (!habit.existedOn(day) || !habit.daysOfWeek.contains(day.weekday)) {
+        continue;
+      }
       sched30++;
       final ds = _fmt(day);
       if (recent.any((l) =>
@@ -109,7 +114,9 @@ class _Body extends ConsumerWidget {
       int s = 0, d = 0;
       for (int i = from; i < to; i++) {
         final day = start.subtract(Duration(days: i));
-        if (!habit.daysOfWeek.contains(day.weekday)) continue;
+        if (!habit.existedOn(day) || !habit.daysOfWeek.contains(day.weekday)) {
+          continue;
+        }
         s++;
         final ds = _fmt(day);
         if (recent.any((l) =>
@@ -196,8 +203,7 @@ class _Body extends ConsumerWidget {
                         const SizedBox(width: 6),
                         if (!habit.isArchived)
                           Text(
-                            habit.section.name[0].toUpperCase() +
-                                habit.section.name.substring(1),
+                            habit.sectionId.sectionName,
                             style: t.meta,
                           )
                         else
@@ -484,7 +490,7 @@ class _SevenDayHeatmap extends StatelessWidget {
     final cells = <(DateTime, bool, bool, bool)>[]; // date, scheduled, done, isToday
     for (int i = 6; i >= 0; i--) {
       final d = today.subtract(Duration(days: i));
-      final scheduled = habit.daysOfWeek.contains(d.weekday);
+      final scheduled = habit.existedOn(d) && habit.daysOfWeek.contains(d.weekday);
       final ds = _fmt(d);
       final done = recent.any((l) =>
           l.habitId == habit.id && l.date == ds && l.completed);

@@ -13,21 +13,20 @@ import '../../../shared/widgets/atlas_controls.dart';
 import '../../../shared/services/notification_service.dart';
 import '../../../shared/services/supabase_service.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../food/domain/targets.dart';
+import '../../food/providers/food_providers.dart';
+import '../../food/providers/weight_providers.dart';
+import '../../food/screens/goal_settings_hub.dart';
+import '../../food/screens/meals_screen.dart';
+import '../../home/providers/home_providers.dart';
+import '../../phase/focus_screen.dart';
 import '../../notifications/domain/notification_prefs.dart';
 import '../../notifications/providers/notification_prefs_provider.dart';
-import '../../phase/phase_provider.dart';
 import '../widgets/edit_sheets.dart';
 
 part 'settings_rows.dart';
 part 'settings_notifications.dart';
 part 'about_me_screen.dart';
-
-const _phaseOptions = {
-  'Rehab + Bulk': 'Rehab + Bulk',
-  'Bulk + Train': 'Bulk + Train',
-  'Performance': 'Performance',
-  'Off-season': 'Off-season',
-};
 
 const _genderOptions = {
   'male': 'Male',
