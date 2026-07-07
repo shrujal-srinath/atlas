@@ -173,21 +173,28 @@ class _Body extends ConsumerWidget {
         ]),
         const SizedBox(height: 22),
 
-        // ─── About ────────────────────────────────────────────
-        _SectionLabel('About'),
+        // ─── Account ──────────────────────────────────────────
+        // Sign-out is routine, not destructive — a quiet row, not a red slab
+        // louder than any primary CTA (NORTHSTAR T6). The confirm dialog is
+        // the guard; the colour stays ink.
+        _SectionLabel('Account'),
         const SizedBox(height: 8),
         _Card(children: [
-          _Row(label: 'Version', value: '1.0.0+1', onTap: null),
+          _NavRow(
+            icon: LucideIcons.logOut,
+            label: 'Sign out',
+            sub: 'You can sign back in anytime',
+            onTap: () => _confirmSignOut(context, ref),
+          ),
         ]),
-        const SizedBox(height: 22),
+        const SizedBox(height: 20),
 
-        // Sign out
-        AtlasButton(
-          label: 'Sign out',
-          icon: LucideIcons.logOut,
-          variant: AtlasButtonVariant.tonal,
-          color: c.negative,
-          onPressed: () => _confirmSignOut(context, ref),
+        // Version as a footer caption — it doesn't earn a card.
+        Center(
+          child: Text(
+            'ATLAS · v1.0.0+1',
+            style: AppType.meta.copyWith(color: c.textDim),
+          ),
         ),
       ],
     );

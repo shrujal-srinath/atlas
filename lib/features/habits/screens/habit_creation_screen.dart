@@ -140,7 +140,15 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
         HabitSection.body => 'breaking',
       };
 
-  Color get _accent => Color(kHabitColorSwatch[_colorKey] ?? 0xFF2DD4BF);
+  /// The habit's identity colour — used ONLY where the habit itself is being
+  /// previewed (icon tint). Form controls stay on the app accent so the screen
+  /// keeps the ATLAS look whatever colour is picked; a teal habit used to turn
+  /// the whole form — segmented controls, chips, even the Save button — teal
+  /// (NORTHSTAR T3).
+  Color get _habitColor => Color(kHabitColorSwatch[_colorKey] ?? 0xFF2DD4BF);
+
+  /// Control accent for every interactive element on this form.
+  Color get _accent => context.c.accent;
 
   String _fmtNum(double v) =>
       v == v.roundToDouble() ? v.toInt().toString() : v.toString();
@@ -360,7 +368,7 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
               const SizedBox(height: 8),
               _IconPicker(
                 selected: _iconKey,
-                tint: _accent,
+                tint: _habitColor,
                 onSelect: (k) => setState(() => _iconKey = k),
               ),
               const SizedBox(height: 16),

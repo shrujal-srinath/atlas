@@ -64,18 +64,20 @@ const List<String> kHabitIconOrder = [
   'pizza','cigarette','beer','phone','gamepad','shopping','cloud-rain','flame','zap',
 ];
 
-/// Icon categories used by the habit-creation picker tabs.
+/// Icon categories used by the habit-creation picker tabs. Display labels —
+/// keep them aligned with the current section/type taxonomy (Building/Breaking
+/// were retired 2026-06-26; "Break" matches the habit-type pill).
 const Map<String, List<String>> kHabitIconCategories = {
   'Athletic': [
     'run','bike','dumbbell','yoga','swim','walk','snowflake','heart-pulse','target','stretch',
   ],
-  'Building': [
+  'Mind': [
     'book','code','pen','brain','guitar','palette','compass','leaf',
   ],
   'Health': [
     'pill','stethoscope','bandage','droplet','bed','salad','apple','egg',
   ],
-  'Breaking': [
+  'Break': [
     'pizza','cigarette','beer','phone','gamepad','shopping','cloud-rain','flame','zap',
   ],
 };

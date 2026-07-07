@@ -48,8 +48,10 @@ class MealPickerSheet extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(AppSpace.screenH, 16, AppSpace.screenH, 6),
             child: Text(
+              // Ink, not accent — an accent-red title reads as a warning, and
+              // sheet titles never carry the accent (NORTHSTAR T3).
               'Which meal would you like to track?',
-              style: t.h2.copyWith(color: c.accent),
+              style: t.h2,
             ),
           ),
           const SizedBox(height: 4),

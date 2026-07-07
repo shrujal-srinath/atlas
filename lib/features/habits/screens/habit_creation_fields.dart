@@ -112,11 +112,16 @@ class _BentoFieldState extends State<_BentoField> {
       // four sides (was double-padded + uncentred before).
       padding: const EdgeInsets.symmetric(horizontal: 14),
       decoration: BoxDecoration(
-        color: c.surfaceElevated,
+        // Inputs read as inputs: surface fill + borderStrong (house rule 5) —
+        // the old surfaceElevated fill ≈ the card behind it, so the field read
+        // as an unpainted patch. The accent focus ring on an empty autofocused
+        // field also read as an error before the user typed anything
+        // (NORTHSTAR T3); focus now just firms the border instead.
+        color: c.surface,
         borderRadius: BorderRadius.circular(AppRadii.chip),
         border: Border.all(
-          color: focused ? c.accent.withValues(alpha: 0.55) : c.border,
-          width: focused ? 1 : 0.5,
+          color: c.borderStrong,
+          width: focused ? 1.4 : 0.8,
         ),
       ),
       child: TextField(
