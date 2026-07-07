@@ -83,18 +83,6 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
     return SupabaseService.auth.resend(type: OtpType.signup, email: email);
   }
 
-  /// Native Google sign-in (google_sign_in v7) → Supabase `signInWithIdToken`.
-  /// Shows the system Google account sheet (no browser bounce), takes the
-  /// returned ID token, and exchanges it for a Supabase session.
-  ///
-  /// Setup required (one-time):
-  ///  - A Google Cloud **Web** OAuth client whose ID is in
-  ///    [SupabaseService.googleWebClientId] (passed as `serverClientId`).
-  ///  - A Google Cloud **Android** OAuth client registered with package
-  ///    `com.shrujalsrinath.atlas` + the build's SHA-1 (no value used in code;
-  ///    Google matches the app by package + signature).
-  ///  - Google provider enabled in Supabase (Web client id + secret).
-  /// Errors (incl. user-cancel) bubble up and are shown via a snackbar.
   /// Browser-based Google OAuth via Supabase. Opens a Chrome Custom Tab, and
   /// the session lands back in the app through the `io.atlas.app://login-callback/`
   /// deep link (intent-filter in AndroidManifest). This deliberately avoids the

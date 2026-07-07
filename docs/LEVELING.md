@@ -148,7 +148,8 @@ The picker hints at the next-band theme so users feel the journey, not just the 
 | 16–25  | **Mastery**     | Per-section mastery quests; cross-skill blends                   |
 | 26+    | **Legacy**      | Mentor / share / build (reserved for a future social tier)       |
 
-Picker UX exists in code; the level-specific *defaults* for the higher bands are deferred until those bands are within reach.
+Picker UX exists in code, and `_suggestionsForLevel` covers **all** bands — the
+earlier note that higher-band defaults were deferred is stale (verified 2026-07-07).
 
 ## 8. Extending the system
 

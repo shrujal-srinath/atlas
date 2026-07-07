@@ -17,16 +17,6 @@ class SupabaseService {
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind0aWVqam9oY2pvdWtqcWtwZ2ltIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3MDUyMDAsImV4cCI6MjA5MzI4MTIwMH0.gxxxKZJeLqP-NB0tolD1DBWI-kNI3cTWCCbkOOcp01w',
   );
 
-  // Google OAuth **Web** client ID — the `serverClientId` the native
-  // google_sign_in flow needs so Android returns an ID token Supabase can
-  // verify. This is a public identifier (not a secret), safe to ship. Paste
-  // your Web client ID below, or override at build time via --dart-define.
-  static const googleWebClientId = String.fromEnvironment(
-    'GOOGLE_WEB_CLIENT_ID',
-    defaultValue:
-        '227397780333-b46m4pnns7vaadftv9280hq9sc8a27em.apps.googleusercontent.com',
-  );
-
   static Future<void> initialize() async {
     await Supabase.initialize(
       url: supabaseUrl,

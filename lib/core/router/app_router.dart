@@ -12,7 +12,7 @@ import '../../shared/services/supabase_service.dart';
 import '../../shared/widgets/offline_pill.dart';
 import '../dev/dev_mode.dart';
 import '../../features/home/screens/home_screen.dart';
-import '../../features/home/widgets/quick_add_sheet.dart';
+import '../../features/home/widgets/home_actions_sheet.dart';
 import '../../features/habits/screens/habit_creation_screen.dart';
 import '../../features/habits/widgets/habit_type_picker.dart';
 import '../../features/habits/screens/habit_library_screen.dart';
