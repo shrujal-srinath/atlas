@@ -86,10 +86,15 @@ enum HabitType { positive, negative, todo }
 enum GoalType { reps, durationMin, distanceKm, litres, custom }
 
 // ── Goal units ────────────────────────────────────────────────────────
-// A goal's numeric value is always stored in a canonical base (minutes for
-// duration, km for distance, L for volume); `Habit.goalUnit` records the unit
-// the user picked so we can show "8 hr" instead of "480 min". One source of
-// truth shared by the goal sheet, creation screen, and home cards.
+// A goal's numeric value is stored **as typed, in the unit the user picked**
+// (`Habit.goalUnit`) — an "8 hr" sleep goal stores `goalValue: 8, goalUnit:
+// 'hr'`, not 480 canonical minutes. Ratio scoring is unit-agnostic
+// (actualValue is captured in the same unit), so this is safe as long as
+// every consumer reads/writes in the habit's own unit rather than assuming
+// a fixed base. `goalToCanonical`/`goalFromCanonical` below exist for
+// callers that need a common unit for a moment (the goal-sheet's live
+// unit-switch preview, the focus timer's real-clock seconds) — they are
+// NOT how the value is persisted.
 
 /// Selectable display units for a goal type. First entry is the canonical base.
 /// Empty when the type carries a free-text unit (custom) or has no alternates.

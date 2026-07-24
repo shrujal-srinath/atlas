@@ -16,6 +16,8 @@ Habit _hab({
   double? goalValue,
   bool effort = false,
   DateTime? createdAt,
+  FrequencyMode frequencyMode = FrequencyMode.everyDay,
+  int? timesPerWeek,
 }) =>
     Habit(
       id: 'h',
@@ -31,6 +33,8 @@ Habit _hab({
       noteEnabled: false,
       isArchived: false,
       createdAt: createdAt,
+      frequencyMode: frequencyMode,
+      timesPerWeek: timesPerWeek,
     );
 
 HabitLog _log(
@@ -38,6 +42,7 @@ HabitLog _log(
   bool completed = true,
   double? actualValue,
   int? effortRating,
+  bool restDay = false,
 }) =>
     HabitLog(
       id: 'l-${_ds(d)}',
@@ -48,6 +53,7 @@ HabitLog _log(
       urgeOnly: false,
       actualValue: actualValue,
       effortRating: effortRating,
+      restDay: restDay,
     );
 
 void main() {
@@ -153,6 +159,109 @@ void main() {
           now: _now);
       expect(s.weekday.firstWhere((w) => w.weekday == 2).scheduled, 0);
       expect(s.weekday.firstWhere((w) => w.weekday == 1).scheduled, greaterThan(0));
+    });
+
+    // ── HABITS_AUDIT §3.2: rest days are neutral, not a miss ─────────────
+    group('rest-day awareness', () {
+      test('a rest day is excluded from the rate, not counted as a miss', () {
+        // Last 7 days: 2 deliberate rests, 5 completed. Without the fix a
+        // rest reads as a scheduled-but-missed day and drags the rate to
+        // 5/7 instead of the correct 5/5.
+        final logs = [
+          for (int i = 0; i < 7; i++)
+            if (i == 2 || i == 5)
+              _log(_now.subtract(Duration(days: i)),
+                  completed: false, restDay: true)
+            else
+              _log(_now.subtract(Duration(days: i))),
+        ];
+        final s = computeTaskStats(
+            habit: _hab(), logs: logs, range: StatRange.week, now: _now);
+        expect(s.scheduledCount, 5);
+        expect(s.completedCount, 5);
+        expect(s.completionRate, 1.0);
+      });
+
+      test('a rest day does not break the best streak, mirroring calculateStreak', () {
+        // today-4..today, all completed except today-2 which is a rest.
+        final logs = [
+          for (int i = 0; i <= 4; i++)
+            if (i == 2)
+              _log(_now.subtract(Duration(days: i)),
+                  completed: false, restDay: true)
+            else
+              _log(_now.subtract(Duration(days: i))),
+        ];
+        final s = computeTaskStats(
+            habit: _hab(), logs: logs, range: StatRange.week, now: _now);
+        // The rest is skipped (like a non-scheduled day) rather than
+        // resetting the run, so all 4 completed days chain into one streak.
+        expect(s.bestStreak, 4);
+      });
+    });
+
+    // ── HABITS_AUDIT §3.3: flexible "X / week" habits use weekly attainment ──
+    group('flexible timesPerWeek habits', () {
+      test('hitting the weekly target reads 100%, not a ~43% per-day rate', () {
+        // 3 completions somewhere in the last 7 days against a 3x/week goal.
+        final logs = [
+          _log(_now.subtract(const Duration(days: 0))),
+          _log(_now.subtract(const Duration(days: 2))),
+          _log(_now.subtract(const Duration(days: 4))),
+        ];
+        final s = computeTaskStats(
+          habit: _hab(
+            frequencyMode: FrequencyMode.timesPerWeek,
+            timesPerWeek: 3,
+            createdAt: _now.subtract(const Duration(days: 30)),
+          ),
+          logs: logs,
+          range: StatRange.week,
+          now: _now,
+        );
+        expect(s.completionRate, 1.0);
+        expect(s.scheduledCount, 3);
+        expect(s.completedCount, 3);
+      });
+
+      test('overshooting the weekly target caps attainment at 1.0', () {
+        final logs = [
+          for (int i = 0; i < 5; i++) _log(_now.subtract(Duration(days: i))),
+        ];
+        final s = computeTaskStats(
+          habit: _hab(
+            frequencyMode: FrequencyMode.timesPerWeek,
+            timesPerWeek: 3,
+            createdAt: _now.subtract(const Duration(days: 30)),
+          ),
+          logs: logs,
+          range: StatRange.week,
+          now: _now,
+        );
+        expect(s.completionRate, 1.0);
+      });
+
+      test('a rest day does not count against the weekly target either', () {
+        // 2 completions + 1 rest = target of 3 fully met (the rest is
+        // neutral, not a missed session).
+        final logs = [
+          _log(_now.subtract(const Duration(days: 0))),
+          _log(_now.subtract(const Duration(days: 2))),
+          _log(_now.subtract(const Duration(days: 4)),
+              completed: false, restDay: true),
+        ];
+        final s = computeTaskStats(
+          habit: _hab(
+            frequencyMode: FrequencyMode.timesPerWeek,
+            timesPerWeek: 2,
+            createdAt: _now.subtract(const Duration(days: 30)),
+          ),
+          logs: logs,
+          range: StatRange.week,
+          now: _now,
+        );
+        expect(s.completionRate, 1.0);
+      });
     });
   });
 }

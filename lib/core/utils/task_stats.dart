@@ -101,10 +101,26 @@ TaskStats computeTaskStats({
     for (final l in logs)
       if (l.completed) l.date,
   };
+  final restDates = <String>{
+    for (final l in logs)
+      if (l.restDay) l.date,
+  };
   // Days before the habit existed aren't "scheduled" — they must not dilute the
   // completion rate or blank out streak bars as if the habit were missed then.
   bool scheduledOn(DateTime d) =>
       habit.existedOn(d) && habit.daysOfWeek.contains(d.weekday);
+  // A deliberate rest day is neutral — HABITS_AUDIT §3.2: it must not count
+  // against the rate/best-streak/weekday split any more than it breaks the
+  // *current* streak (`calculateStreak` already skips it the same way).
+  bool countsOn(DateTime d) => scheduledOn(d) && !restDates.contains(_ds(d));
+
+  // Flexible "X / week" habits store `daysOfWeek` as all-7 (any day is a
+  // valid day to do them), so a per-day denominator reads a perfectly-run
+  // 3x/week habit as ~43% (HABITS_AUDIT §3.3). Their headline instead
+  // averages weekly attainment (`completedInWeek / timesPerWeek`, capped at
+  // 1.0 per week) across the weeks the habit existed in.
+  final isFlexible = habit.frequencyMode == FrequencyMode.timesPerWeek &&
+      (habit.timesPerWeek ?? 0) > 0;
 
   // ── Headline rate + weekday split over the trailing window ──────────
   final windowDays = range.windowDays;
@@ -113,7 +129,7 @@ TaskStats computeTaskStats({
   final wkScheduled = List<int>.filled(8, 0);
   for (int i = 0; i < windowDays; i++) {
     final d = today.subtract(Duration(days: i));
-    if (!scheduledOn(d)) continue;
+    if (!countsOn(d)) continue;
     scheduled++;
     wkScheduled[d.weekday]++;
     if (doneDates.contains(_ds(d))) {
@@ -121,7 +137,21 @@ TaskStats computeTaskStats({
       wkCompleted[d.weekday]++;
     }
   }
-  final rate = scheduled == 0 ? 0.0 : completed / scheduled;
+
+  double rate;
+  if (isFlexible) {
+    final weeks =
+        _weeklyAttainment(habit, doneDates, restDates, today, windowDays);
+    final counted = weeks.where((w) => w.target > 0).toList();
+    rate = counted.isEmpty
+        ? 0.0
+        : counted.map((w) => w.attainment).reduce((a, b) => a + b) /
+            counted.length;
+    completed = counted.fold(0, (acc, w) => acc + w.completed);
+    scheduled = counted.fold(0, (acc, w) => acc + w.target);
+  } else {
+    rate = scheduled == 0 ? 0.0 : completed / scheduled;
+  }
 
   final weekday = [
     for (int w = 1; w <= 7; w++)
@@ -133,7 +163,7 @@ TaskStats computeTaskStats({
   int best = 0, run = 0;
   for (int i = 0; i < 366; i++) {
     final d = today.subtract(Duration(days: i));
-    if (!scheduledOn(d)) continue;
+    if (!countsOn(d)) continue;
     if (doneDates.contains(_ds(d))) {
       run++;
       if (run > best) best = run;
@@ -144,9 +174,9 @@ TaskStats computeTaskStats({
 
   // ── Rate trend buckets (shape depends on range) ─────────────────────
   final trend = switch (range) {
-    StatRange.week => _dailyBuckets(scheduledOn, doneDates, today),
-    StatRange.month => _weeklyBuckets(scheduledOn, doneDates, today),
-    StatRange.year => _monthlyBuckets(scheduledOn, doneDates, today),
+    StatRange.week => _dailyBuckets(countsOn, doneDates, today),
+    StatRange.month => _weeklyBuckets(countsOn, doneDates, today),
+    StatRange.year => _monthlyBuckets(countsOn, doneDates, today),
   };
 
   // ── Performance + effort series within the window ───────────────────
@@ -223,6 +253,44 @@ List<TrendBucket> _weeklyBuckets(
       rate: sched == 0 ? 0 : done / sched,
       active: sched > 0,
     ));
+  }
+  return out;
+}
+
+/// One trailing 7-day bucket's attainment for a flexible "X / week" habit.
+class _WeekAttainment {
+  final int completed; // raw completed days this week that count (not rest)
+  final int target;    // habit.timesPerWeek, or 0 if it didn't exist that week
+  const _WeekAttainment(this.completed, this.target);
+  double get attainment => target == 0 ? 0.0 : (completed / target).clamp(0, 1);
+}
+
+/// Buckets [windowDays] into trailing non-overlapping 7-day weeks (same
+/// construction as [_weeklyBuckets]) and scores each against
+/// `habit.timesPerWeek` — the headline number for flexible habits (§3.3).
+List<_WeekAttainment> _weeklyAttainment(
+  Habit habit,
+  Set<String> doneDates,
+  Set<String> restDates,
+  DateTime today,
+  int windowDays,
+) {
+  final target = habit.timesPerWeek ?? 0;
+  final bucketCount = (windowDays / 7).ceil();
+  final out = <_WeekAttainment>[];
+  for (int w = bucketCount - 1; w >= 0; w--) {
+    final weekEnd = today.subtract(Duration(days: w * 7));
+    var existedAnyDay = false;
+    var completed = 0;
+    for (int i = 0; i < 7; i++) {
+      final d = weekEnd.subtract(Duration(days: i));
+      if (!habit.existedOn(d)) continue;
+      existedAnyDay = true;
+      final ds = _ds(d);
+      if (restDates.contains(ds)) continue; // neutral, not a miss
+      if (doneDates.contains(ds)) completed++;
+    }
+    out.add(_WeekAttainment(completed, existedAnyDay ? target : 0));
   }
   return out;
 }

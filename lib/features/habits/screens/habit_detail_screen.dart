@@ -7,7 +7,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/atlas_controls.dart';
 import '../../../core/utils/error_messages.dart';
 import '../../../core/theme/app_icons.dart';
-import '../../../core/utils/streak_engine.dart';
+import '../../../core/utils/task_stats.dart';
 import '../../../shared/models/models.dart';
 import '../../home/scoring/section_def.dart';
 import '../../../shared/services/notification_service.dart';
@@ -67,68 +67,35 @@ class _Body extends ConsumerWidget {
     return habit.sectionId.sectionColor(context.c);
   }
 
+  // HABITS_AUDIT §3.1/§4.4: this used to walk back 365 days for "BEST" but
+  // fed itself `recentHabitLogsProvider` (a 60-day query) — any streak or
+  // completion older than 60 days was invisible, silently wrong for
+  // long-lived habits, and the duplicated day-by-day math here disagreed
+  // with the per-habit stats screen's `computeTaskStats` (no rest-day or
+  // flexible-week awareness). Delegate to the same pure engine over the full
+  // 366-day history instead — one source of truth for both screens.
   ({int current, int best, double rate30d, double trendDelta, double health})
-      _stats(List<HabitLog> recent) {
+      _stats(List<HabitLog> history) {
     final today = DateTime.now();
     final start = DateTime(today.year, today.month, today.day);
-    // Current streak
-    final current = calculateStreak(habit, recent);
 
-    // Walk back 365 days to compute best streak.
-    int best = current;
-    int run = 0;
-    for (int i = 0; i < 365; i++) {
-      final day = start.subtract(Duration(days: i));
-      if (!habit.existedOn(day) || !habit.daysOfWeek.contains(day.weekday)) {
-        continue;
-      }
-      final ds = _fmt(day);
-      final hit = recent
-          .any((l) => l.habitId == habit.id && l.date == ds && l.completed);
-      if (hit) {
-        run++;
-        if (run > best) best = run;
-      } else {
-        run = 0;
-      }
-    }
+    final month = computeTaskStats(
+        habit: habit, logs: history, range: StatRange.month, now: start);
+    final current = month.currentStreak;
+    final best = month.bestStreak;
+    final rate30d = month.completionRate;
 
-    // 30d rate (only counts scheduled days in window).
-    int sched30 = 0, done30 = 0;
-    for (int i = 0; i < 30; i++) {
-      final day = start.subtract(Duration(days: i));
-      if (!habit.existedOn(day) || !habit.daysOfWeek.contains(day.weekday)) {
-        continue;
-      }
-      sched30++;
-      final ds = _fmt(day);
-      if (recent.any((l) =>
-          l.habitId == habit.id && l.date == ds && l.completed)) {
-        done30++;
-      }
-    }
-    final rate30d = sched30 == 0 ? 0.0 : done30 / sched30;
-
-    // Trend: rate last 7 vs prior 7.
-    double rateWindow(int from, int to) {
-      int s = 0, d = 0;
-      for (int i = from; i < to; i++) {
-        final day = start.subtract(Duration(days: i));
-        if (!habit.existedOn(day) || !habit.daysOfWeek.contains(day.weekday)) {
-          continue;
-        }
-        s++;
-        final ds = _fmt(day);
-        if (recent.any((l) =>
-            l.habitId == habit.id && l.date == ds && l.completed)) {
-          d++;
-        }
-      }
-      return s == 0 ? 0.0 : d / s;
-    }
-
-    final r0 = rateWindow(0, 7);
-    final r1 = rateWindow(7, 14);
+    // Trend: rate this-week vs the week before, via the same engine call
+    // with `now` shifted back — no separate math to keep in sync.
+    final r0 = computeTaskStats(
+            habit: habit, logs: history, range: StatRange.week, now: start)
+        .completionRate;
+    final r1 = computeTaskStats(
+            habit: habit,
+            logs: history,
+            range: StatRange.week,
+            now: start.subtract(const Duration(days: 7)))
+        .completionRate;
     final trendDelta = r0 - r1;
 
     // Health = 50% recent rate + 30% streak/best + 20% trend.
@@ -153,8 +120,9 @@ class _Body extends ConsumerWidget {
     final c = context.c;
     final t = context.t;
     final accent = _accent(context);
-    final recent = ref.watch(recentHabitLogsProvider).valueOrNull ?? const [];
-    final s = _stats(recent);
+    final history =
+        ref.watch(habitLogHistoryProvider(habit.id)).valueOrNull ?? const [];
+    final s = _stats(history);
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(
@@ -266,7 +234,7 @@ class _Body extends ConsumerWidget {
         const SizedBox(height: 16),
 
         // 7-day mini heatmap
-        _SevenDayHeatmap(habit: habit, recent: recent, accent: accent),
+        _SevenDayHeatmap(habit: habit, recent: history, accent: accent),
         const SizedBox(height: 16),
 
         // Health score card
@@ -427,8 +395,8 @@ class _Body extends ConsumerWidget {
       rows.add((
         icon: LucideIcons.target,
         label: 'Goal',
-        value:
-            '${habit.goalValue!.toStringAsFixed(0)} ${_goalUnit(habit.goalType!)}',
+        value: '${_trimZero(habit.goalValue!)} '
+            '${goalUnitLabel(habit.goalType!, habit.goalUnit)}',
       ));
     }
     if (habit.skillCategory != null) {
@@ -454,13 +422,10 @@ class _Body extends ConsumerWidget {
   String _dayLabel(int d) =>
       const ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][d];
 
-  String _goalUnit(GoalType g) => switch (g) {
-        GoalType.reps => 'reps',
-        GoalType.durationMin => 'min',
-        GoalType.distanceKm => 'km',
-        GoalType.litres => 'L',
-        GoalType.custom => 'units',
-      };
+  // Rule 11 (never round misleadingly): a 1.5 hr goal must read "1.5 hr", not
+  // "2 hr" — only drop the decimal when the value is a whole number.
+  String _trimZero(double v) =>
+      v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
 }
 
 /// Compact 7-day heatmap. Renders 7 day columns (Mon-aligned, oldest left)

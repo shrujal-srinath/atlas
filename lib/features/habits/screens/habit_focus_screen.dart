@@ -12,10 +12,12 @@ import '../../../shared/models/models.dart';
 import '../../home/scoring/section_def.dart';
 import '../providers/habit_provider.dart';
 
-/// Full-screen countdown timer for a single `durationMin` habit. Starts
-/// at goalValue minutes; on complete, auto-logs the habit and pops. Stopping
-/// early logs whatever fraction was completed as `actualValue` (also persisted
-/// so partial credit shows up in the score engine).
+/// Full-screen countdown timer for a single `durationMin` habit. Starts at
+/// `goalValue` converted to minutes (the stored value is in the habit's own
+/// `goalUnit`, e.g. hours — see `_bootstrap`); on complete, auto-logs the
+/// habit and pops. Stopping early logs whatever fraction was completed as
+/// `actualValue`, converted back to `goalUnit` so it stays comparable to
+/// `goalValue` for the score engine's ratio.
 class HabitFocusScreen extends ConsumerStatefulWidget {
   final String habitId;
   const HabitFocusScreen({super.key, required this.habitId});
@@ -44,11 +46,19 @@ class _HabitFocusScreenState extends ConsumerState<HabitFocusScreen> {
   void _bootstrap() {
     final habits = ref.read(habitsProvider).valueOrNull ?? const [];
     final habit = habits.where((h) => h.id == widget.habitId).firstOrNull;
-    if (habit == null) {
+    // This screen only makes sense for a duration goal. `goalValue` is
+    // stored in whatever unit the user picked (`habit.goalUnit`), not
+    // always minutes — an 8-**hour** sleep goal used to seed an 8-*minute*
+    // countdown here (HABITS_AUDIT §3.4). Convert to canonical minutes via
+    // the same helper the goal-unit picker uses instead of assuming the
+    // stored number already is minutes.
+    if (habit == null || habit.goalType != GoalType.durationMin) {
       Navigator.of(context).pop();
       return;
     }
-    final mins = (habit.goalValue ?? 0).toInt().clamp(1, 240);
+    final canonicalMin =
+        goalToCanonical(GoalType.durationMin, habit.goalUnit, habit.goalValue ?? 0);
+    final mins = canonicalMin.toInt().clamp(1, 240);
     setState(() {
       _habit = habit;
       _totalSec = mins * 60;
@@ -91,7 +101,15 @@ class _HabitFocusScreenState extends ConsumerState<HabitFocusScreen> {
       return;
     }
     final elapsedSec = _totalSec - _remainingSec;
-    final elapsedMin = elapsedSec / 60.0;
+    // The clock always ticks in real minutes; convert back to the habit's
+    // own goal unit (e.g. hours) before display/persist so `actualValue`
+    // stays in the same unit as `goalValue` — the score engine's ratio
+    // assumes both are (see the bootstrap comment above).
+    final elapsedInGoalUnit = goalFromCanonical(
+        GoalType.durationMin, h.goalUnit, elapsedSec / 60.0);
+    final totalInGoalUnit =
+        goalFromCanonical(GoalType.durationMin, h.goalUnit, _totalSec / 60.0);
+    final unitLabel = goalUnitLabel(GoalType.durationMin, h.goalUnit);
     final shouldLog = await showDialog<bool>(
       context: context,
       builder: (ctx) {
@@ -100,7 +118,8 @@ class _HabitFocusScreenState extends ConsumerState<HabitFocusScreen> {
           backgroundColor: c.surface,
           title: Text('Stop session?', style: ctx.t.h2),
           content: Text(
-            'You did ${elapsedMin.toStringAsFixed(1)} of ${(_totalSec / 60).round()} min. '
+            'You did ${elapsedInGoalUnit.toStringAsFixed(1)} of '
+            '${totalInGoalUnit.toStringAsFixed(1)} $unitLabel. '
             'Log partial progress?',
             style: ctx.t.body.copyWith(color: c.textSecondary),
           ),
@@ -119,7 +138,7 @@ class _HabitFocusScreenState extends ConsumerState<HabitFocusScreen> {
     );
     if (!mounted) return;
     if (shouldLog == true && elapsedSec > 0) {
-      await _persist(actual: elapsedMin, completed: false);
+      await _persist(actual: elapsedInGoalUnit, completed: false);
     }
     if (mounted) Navigator.of(context).pop();
   }
