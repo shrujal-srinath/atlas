@@ -110,7 +110,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
           .verifySignup(email: _email, code: code);
       if (!mounted) return;
       HapticFeedback.mediumImpact();
-      showSnack(context, 'Email verified — welcome to ATLAS.');
+      showSnack(context, 'Email verified — welcome to STRIDE.');
       // Navigation is handled by the router redirect (signup → splash →
       // onboarding once the session lands) — hardcoding /home here would flash
       // the home page before the onboarding gate resolves.
@@ -151,7 +151,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       title: isVerify ? 'Verify your email' : 'Create your account',
       subtitle: isVerify
           ? 'Enter the 6-digit code we sent to $_email.'
-          : 'Set up ATLAS in under a minute.',
+          : 'Set up STRIDE in under a minute.',
       footer: isVerify ? _verifyFooter() : _detailsFooter(),
       child: isVerify ? _verifyCard() : _detailsCard(),
     );

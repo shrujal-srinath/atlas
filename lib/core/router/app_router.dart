@@ -10,6 +10,7 @@ import '../../features/auth/providers/auth_provider.dart';
 import '../../shared/models/models.dart';
 import '../../shared/services/supabase_service.dart';
 import '../../shared/widgets/offline_pill.dart';
+import '../../shared/widgets/brand_mark.dart';
 import '../dev/dev_mode.dart';
 import '../../features/home/screens/home_screen.dart';
 import '../../features/home/widgets/home_actions_sheet.dart';
@@ -305,34 +306,94 @@ Page<void> _slidePage(LocalKey key, Widget child) => CustomTransitionPage<void>(
 
 /// Neutral launch / hand-off screen shown while the signed-in user's profile
 /// resolves — so neither home nor onboarding flashes before we know which to
-/// show. Matches the app background with a quiet branded spinner.
-class SplashScreen extends StatelessWidget {
+/// show. The live brand mark (ruby score-ring sweeping around the "S") is the
+/// first thing a user sees, so it does the double duty of loader + logo; the
+/// wordmark rises in beneath it. Theme-aware for both BENTO and OBSIDIAN.
+class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
+
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _intro;
+
+  @override
+  void initState() {
+    super.initState();
+    _intro = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 640),
+    )..forward();
+  }
+
+  @override
+  void dispose() {
+    _intro.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final c = context.c;
+    final intro = CurvedAnimation(parent: _intro, curve: Curves.easeOutCubic);
     return Scaffold(
       backgroundColor: c.background,
       body: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(
-              'ATLAS',
-              style: TextStyle(
-                fontFamily: 'SpaceGrotesk',
-                fontSize: 34,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 2,
-                color: c.textPrimary,
-              ),
+            BrandSpinner(
+              size: 78,
+              ring: c.accent,
+              track: c.border,
+              letter: c.textPrimary,
             ),
-            const SizedBox(height: 24),
-            SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(strokeWidth: 2.4, color: c.accent),
+            const SizedBox(height: 28),
+            FadeTransition(
+              opacity: intro,
+              child: AnimatedBuilder(
+                animation: intro,
+                builder: (context, child) => Transform.translate(
+                  offset: Offset(0, 10 * (1 - intro.value)),
+                  child: child,
+                ),
+                child: Column(
+                  children: [
+                    // Trailing tracking is compensated with matching left pad
+                    // so the wordmark stays optically centred.
+                    Padding(
+                      padding: const EdgeInsets.only(left: 7),
+                      child: Text(
+                        'STRIDE',
+                        style: TextStyle(
+                          fontFamily: 'SpaceGrotesk',
+                          fontSize: 30,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 7,
+                          color: c.textPrimary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 9),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 3.4),
+                      child: Text(
+                        'PERFORMANCE OS',
+                        style: TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 3.4,
+                          color: c.textMuted,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ],
         ),

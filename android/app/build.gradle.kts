@@ -33,7 +33,7 @@ android {
 
     defaultConfig {
         // Permanent once published — change before first Play upload if desired.
-        applicationId = "com.shrujalsrinath.atlas"
+        applicationId = "com.shrujalsrinath.stride"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

@@ -82,7 +82,7 @@ class FoodScoreInfoSheet extends StatelessWidget {
                 body:
                     'How closely you hit your calorie & protein targets for your '
                     'current goal (bulk, cut or maintain). This is what powers your '
-                    'ATLAS score and XP.',
+                    'STRIDE score and XP.',
                 bands: const [],
               ),
               const SizedBox(height: 16),

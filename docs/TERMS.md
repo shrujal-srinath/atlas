@@ -1,21 +1,21 @@
-# ATLAS — Terms of Use
+# STRIDE — Terms of Use
 
 _Last updated: 23 June 2026_
 
-By using ATLAS ("the app") you agree to these terms. Host this at a public URL
+By using STRIDE ("the app") you agree to these terms. Host this at a public URL
 and link it from the app and your store listings.
 
 ## The service
-ATLAS is a personal-performance and habit/nutrition tracking app provided "as
+STRIDE is a personal-performance and habit/nutrition tracking app provided "as
 is". You are responsible for the accuracy of the data you enter and for how you
 use the insights it provides.
 
 ## Not medical advice
-ATLAS is **not a medical, nutritional, or fitness professional service**. Scores,
+STRIDE is **not a medical, nutritional, or fitness professional service**. Scores,
 calorie/nutrient figures, and trends are informational only and may be
 incomplete or inaccurate (nutrition data derives from public databases such as
 IFCT, USDA, and Open Food Facts). Consult a qualified professional before making
-health, diet, or training decisions. Do not rely on ATLAS for any medical
+health, diet, or training decisions. Do not rely on STRIDE for any medical
 purpose.
 
 ## Your account
@@ -36,4 +36,4 @@ and we are not liable for any loss arising from its use or from reliance on its
 data.
 
 ## Contact
-**[CONTACT EMAIL]**
+**shrujalsrinath@gmail.com**

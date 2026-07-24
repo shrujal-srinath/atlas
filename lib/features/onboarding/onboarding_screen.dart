@@ -571,7 +571,7 @@ class _StepName extends StatelessWidget {
       overline: 'STEP 1 OF 3',
       title: 'Welcome.',
       subtitle:
-          'ATLAS is your personal performance OS. We start with the basics.',
+          'STRIDE is your personal performance OS. We start with the basics.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [

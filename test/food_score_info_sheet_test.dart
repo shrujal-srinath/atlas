@@ -13,9 +13,9 @@ void main() {
     expect(find.text('Two ways we read your day'), findsOneWidget);
     expect(find.text('Food quality'), findsOneWidget);
     expect(find.text('Goal adherence'), findsOneWidget);
-    // Quality bands are listed; adherence points at the ATLAS score.
+    // Quality bands are listed; adherence points at the STRIDE score.
     expect(find.textContaining('Excellent', findRichText: true), findsOneWidget);
-    expect(find.textContaining('ATLAS score'), findsOneWidget);
+    expect(find.textContaining('STRIDE score'), findsOneWidget);
     expect(find.text('Got it'), findsOneWidget);
   });
 }

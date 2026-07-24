@@ -10,7 +10,7 @@ import '../domain/food.dart';
 /// the v0 product API for barcodes. All nutrient values are normalised to
 /// per-100 g (`servingQty=100, servingUnit='g'`).
 class OffClient {
-  static const _ua = 'Atlas/1.0 (personal-OS; contact: shrujalsrinath@gmail.com)';
+  static const _ua = 'Stride/1.0 (personal-OS; contact: shrujalsrinath@gmail.com)';
   final http.Client _http;
   OffClient({http.Client? client}) : _http = client ?? http.Client();
 

@@ -84,16 +84,16 @@ class AuthNotifier extends StateNotifier<AsyncValue<void>> {
   }
 
   /// Browser-based Google OAuth via Supabase. Opens a Chrome Custom Tab, and
-  /// the session lands back in the app through the `io.atlas.app://login-callback/`
+  /// the session lands back in the app through the `io.stride.app://login-callback/`
   /// deep link (intent-filter in AndroidManifest). This deliberately avoids the
   /// native `google_sign_in` / Credential Manager path, which fails on many
   /// devices with `[16] Account reauth failed`. Requires, in the Supabase
-  /// dashboard: Google provider enabled + `io.atlas.app://login-callback/` in
+  /// dashboard: Google provider enabled + `io.stride.app://login-callback/` in
   /// Auth → URL Configuration → Redirect URLs.
   Future<void> signInWithGoogle() async {
     await SupabaseService.auth.signInWithOAuth(
       OAuthProvider.google,
-      redirectTo: kIsWeb ? null : 'io.atlas.app://login-callback/',
+      redirectTo: kIsWeb ? null : 'io.stride.app://login-callback/',
     );
   }
 

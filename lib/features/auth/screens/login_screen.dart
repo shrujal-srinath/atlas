@@ -11,6 +11,7 @@ import '../widgets/demo_video_placeholder.dart';
 import '../widgets/glass_card.dart';
 import '../widgets/headline_rotator.dart';
 import '../../../shared/widgets/app_snackbar.dart';
+import '../../../shared/widgets/brand_mark.dart';
 
 /// Cinematic, light-mode login: a living gradient canvas with a hero
 /// (wordmark · demo-video placeholder · rotating headline) above a frosted-
@@ -215,7 +216,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
             ),
           ),
           const SizedBox(height: 10),
-          _rise(0, const Text('ATLAS', style: AuthType.wordmark)),
+          _rise(0, const Text('STRIDE', style: AuthType.wordmark)),
           const SizedBox(height: 22),
           _rise(
             1,
@@ -396,21 +397,31 @@ class _LoginScreenState extends ConsumerState<LoginScreen>
   Widget _launchingView() {
     return Padding(
       key: const ValueKey('launching'),
-      padding: const EdgeInsets.symmetric(vertical: 30),
+      padding: const EdgeInsets.symmetric(vertical: 34),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text('ATLAS', style: AuthType.title),
-          const SizedBox(height: 20),
-          const SizedBox(
-            width: 26,
-            height: 26,
-            child: CircularProgressIndicator(
-              strokeWidth: 2.4,
-              color: AuthColors.accent,
+          const BrandSpinner(
+            size: 62,
+            ring: AuthColors.accent,
+            track: AuthColors.fieldBorder,
+            letter: AuthColors.ink,
+          ),
+          const SizedBox(height: 22),
+          const Padding(
+            padding: EdgeInsets.only(left: 4),
+            child: Text(
+              'STRIDE',
+              style: TextStyle(
+                fontFamily: 'SpaceGrotesk',
+                fontSize: 20,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 4,
+                color: AuthColors.ink,
+              ),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
           Text(
             'Setting up your day…',
             style: AuthType.body.copyWith(color: AuthColors.inkSecondary),

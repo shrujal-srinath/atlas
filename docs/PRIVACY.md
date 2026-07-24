@@ -1,8 +1,8 @@
-# ATLAS — Privacy Policy
+# STRIDE — Privacy Policy
 
 _Last updated: 23 June 2026_
 
-ATLAS ("the app", "we") is a personal-performance tracker. This policy explains
+STRIDE ("the app", "we") is a personal-performance tracker. This policy explains
 what data the app collects, why, and your choices. Host this document at a
 public URL and link it from the app and your store listings.
 
@@ -48,11 +48,11 @@ in-app (Settings → Account → Delete account), which removes your account and
 your associated data. You can also sign out at any time.
 
 ## Children
-ATLAS is not directed to children under 13 (or the minimum age in your region).
+STRIDE is not directed to children under 13 (or the minimum age in your region).
 
 ## Changes
 We may update this policy; the "Last updated" date will change. Material changes
 will be surfaced in-app where appropriate.
 
 ## Contact
-Questions or data requests: **[CONTACT EMAIL]**.
+Questions or data requests: **shrujalsrinath@gmail.com**.
