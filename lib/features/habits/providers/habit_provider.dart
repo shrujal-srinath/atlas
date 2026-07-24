@@ -338,14 +338,15 @@ class HabitActionsNotifier extends StateNotifier<AsyncValue<void>> {
       'actual_value': ?actualValue,
     };
 
-    if (existing != null) {
-      await SupabaseService.client
-          .from('habit_logs')
-          .update(payload)
-          .eq('id', existing['id'] as String);
-    } else {
-      await SupabaseService.client.from('habit_logs').insert(payload);
-    }
+    // Upsert on the (habit_id, date) unique constraint (SR-6) rather than
+    // branching on the `existing` read above: two rapid taps (or two
+    // devices) can both see "no existing row" and both take the insert
+    // branch, leaving duplicate log rows that all future reads then have to
+    // reconcile with `.any()`. An upsert is atomic at the DB level
+    // regardless of what either caller read beforehand.
+    await SupabaseService.client
+        .from('habit_logs')
+        .upsert(payload, onConflict: 'habit_id,date');
 
     // Auto-log / un-log any linked food for this task on this date.
     await _syncFoodLink(habitId: habitId, date: date, completed: isCompleted);
@@ -404,13 +405,6 @@ class HabitActionsNotifier extends StateNotifier<AsyncValue<void>> {
     final session = _ref.read(sessionProvider);
     if (session == null) return;
 
-    final existing = await SupabaseService.client
-        .from('habit_logs')
-        .select()
-        .eq('habit_id', habitId)
-        .eq('date', date)
-        .maybeSingle();
-
     final payload = <String, dynamic>{
       'habit_id': habitId,
       'user_id': session.user.id,
@@ -420,14 +414,10 @@ class HabitActionsNotifier extends StateNotifier<AsyncValue<void>> {
       'actual_value': null,
     };
 
-    if (existing != null) {
-      await SupabaseService.client
-          .from('habit_logs')
-          .update(payload)
-          .eq('id', existing['id'] as String);
-    } else {
-      await SupabaseService.client.from('habit_logs').insert(payload);
-    }
+    // Atomic upsert (SR-6) — see the comment in toggleHabit above.
+    await SupabaseService.client
+        .from('habit_logs')
+        .upsert(payload, onConflict: 'habit_id,date');
 
     // A rest is not a completion — drop any auto-logged food for the day.
     await _syncFoodLink(habitId: habitId, date: date, completed: false);

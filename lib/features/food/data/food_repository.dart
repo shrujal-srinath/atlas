@@ -166,40 +166,41 @@ class FoodRepository {
     return hit;
   }
 
-  /// Upsert a freshly-scanned branded product into the shared catalog.
+  /// Cache a freshly-scanned branded product into the shared catalog via the
+  /// `cache_branded_food` RPC (SECURITY DEFINER — see
+  /// `20260724_food_catalog_rpc.sql`). `food_catalog` is a table every
+  /// user's search reads from; a direct client upsert let any authenticated
+  /// user overwrite any other user's cached row with unvalidated values, so
+  /// the id/source/barcode/search_text are now derived server-side and
+  /// every numeric field is range-clamped there — this call just forwards
+  /// what the client saw.
   Future<void> _cacheBranded(Food f) async {
     final code = f.offBarcode;
     if (code == null || code.isEmpty) return;
-    await SupabaseService.client
-        .from('food_catalog')
-        .upsert(
-          {
-            'id': 'off:$code',
-            'source': 'off',
-            'barcode': code,
-            'name': f.name,
-            if (f.brand != null) 'brand': f.brand,
-            'serving_qty': 100,
-            'serving_unit': 'g',
-            ...f.per.toColumns(),
-            'region': 'IN',
-            'popularity': 4,
-            // Persist the food's own measures (parsed from OFF's serving size) so the
-            // cached row defaults to the same "1 Serving"/"1 Pack" as the live scan.
-            'measures': f.measures.isNotEmpty
-                ? [
-                    for (final m in f.measures)
-                      {'label': m.label, 'g': m.grams},
-                  ]
-                : const [
-                    {'label': 'g', 'g': 1},
-                    {'label': 'Pack', 'g': 50},
-                  ],
-            'search_text': '${f.name} ${f.brand ?? ''}'.toLowerCase().trim(),
-          },
-          onConflict: 'id',
-          ignoreDuplicates: true,
-        );
+    await SupabaseService.client.rpc(
+      'cache_branded_food',
+      params: {
+        'payload': {
+          'barcode': code,
+          'name': f.name,
+          if (f.brand != null) 'brand': f.brand,
+          'serving_qty': 100,
+          'serving_unit': 'g',
+          ...f.per.toColumns(),
+          // Persist the food's own measures (parsed from OFF's serving size) so the
+          // cached row defaults to the same "1 Serving"/"1 Pack" as the live scan.
+          'measures': f.measures.isNotEmpty
+              ? [
+                  for (final m in f.measures)
+                    {'label': m.label, 'g': m.grams},
+                ]
+              : const [
+                  {'label': 'g', 'g': 1},
+                  {'label': 'Pack', 'g': 50},
+                ],
+        },
+      },
+    );
   }
 
   /// The user's most-logged foods over the last [days] days, with their log

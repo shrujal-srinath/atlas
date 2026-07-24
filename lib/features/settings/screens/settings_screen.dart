@@ -291,10 +291,85 @@ class _Body extends ConsumerWidget {
         );
       },
     );
-    if (confirm == true) {
-      await NotificationService.instance.cancelAll();
-      await ref.read(userActionsProvider.notifier).deleteAccount();
+    if (confirm != true) return;
+    if (!context.mounted) return;
+
+    // P1-6: a confirm dialog alone lets anyone with a momentarily-unlocked
+    // phone erase the account. Require the current password immediately
+    // before the destructive call — re-signing-in with it both proves
+    // possession and is a legitimate Supabase re-auth (a fresh, valid
+    // session is what's about to be torn down anyway).
+    final password = await _promptPasswordForDeletion(context);
+    if (password == null || password.isEmpty) return;
+    if (!context.mounted) return;
+
+    final email = ref.read(sessionProvider)?.user.email;
+    if (email == null) return;
+
+    try {
+      await SupabaseService.client.auth
+          .signInWithPassword(email: email, password: password);
+    } catch (e) {
+      if (context.mounted) showErrorSnack(context, e);
+      return;
     }
+
+    if (!context.mounted) return;
+    await NotificationService.instance.cancelAll();
+    await ref.read(userActionsProvider.notifier).deleteAccount();
+  }
+
+  Future<String?> _promptPasswordForDeletion(BuildContext context) {
+    final controller = TextEditingController();
+    return showDialog<String>(
+      context: context,
+      builder: (ctx) {
+        final cc = ctx.c;
+        final tt = ctx.t;
+        return AlertDialog(
+          backgroundColor: cc.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.card),
+            side: BorderSide(color: cc.border),
+          ),
+          title: Text('Confirm your password', style: tt.h2),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'For your security, re-enter your password to permanently '
+                'delete your account.',
+                style: tt.body.copyWith(color: cc.textSecondary),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: controller,
+                obscureText: true,
+                autofocus: true,
+                autofillHints: const [AutofillHints.password],
+                decoration: const InputDecoration(labelText: 'Password'),
+                onSubmitted: (v) => Navigator.pop(ctx, v),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, controller.text),
+              child: Text(
+                'Delete account',
+                style: TextStyle(
+                    color: cc.negative, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   Future<void> _confirmSignOut(BuildContext context, WidgetRef ref) async {
