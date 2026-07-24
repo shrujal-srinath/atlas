@@ -530,14 +530,19 @@ class NotificationService {
 
   // ── Notification ID space ────────────────────────────────────────
   //
-  // Habit reminders use _idFor(habitId, dow) which spans 0..0x7FFFFFFF.
-  // Reserve a small fixed band for non-habit categories — far above what
-  // hash codes typically land in (low double-digits).
+  // Habit reminders use _idFor(habitId, dow), a hash-derived value spanning
+  // the full 0..0x7FFFFFFF positive range — any fixed positive band, however
+  // "far" it looks, is reachable by chance. Every non-habit category is
+  // therefore parked in **negative** ids instead: habit ids are always
+  // non-negative (masked with 0x7FFFFFFF), so negative bands can never
+  // collide with them, by construction rather than by low probability.
 
-  static const _kWaterIdBase  = 100;   // 100..123 — up to 24 water slots
-  static const _kMoodIdBase   = 130;   // 130..145 — up to 16 mood-checkin slots
-  static const _kStreakRiskId = 200;
-  static const _kWeightNudgeId = 201;
+  static const _kWaterIdBase   = -1024; // -1024..-1001 — up to 24 water slots
+  static const _kMoodIdBase    = -2048; // -2048..-2033 — up to 16 mood-checkin slots
+  static const _kStreakRiskId  = -3001;
+  static const _kWeightNudgeId = -3002;
+  static const _kMealIdBase    = -4096; // -4096..-12095 — hashed meal slots
+  static const _kNoteIdBase    = -1000000000; // -1e9 .. -1.096e9 — hashed note slots
 
   int _idFor(String habitId, int dow) {
     // 31-bit positive int derived from habitId + dow.
@@ -548,16 +553,14 @@ class NotificationService {
   /// Deterministic ID for a non-habit category slot (currently used for meals).
   int _idForSlot(String category, String slotKey) {
     final base = '$category:$slotKey'.hashCode & 0x7FFFFFFF;
-    // Park it above the static-id band so it can't collide with the constants.
-    return 1000 + (base % 8000);
+    return _kMealIdBase - (base % 8000);
   }
 
   /// Deterministic ID for note-reminder [slot] (0=one-time/daily, 1..7=weekday).
-  /// Parked in a high band (1.0e9 … 1.1e9, safely below int32 max) with 8
-  /// consecutive ids reserved per note so a re-schedule replaces cleanly.
+  /// 8 consecutive ids reserved per note so a re-schedule replaces cleanly.
   int _noteIdFor(String noteId, int slot) {
     final base = (noteId.hashCode & 0x7FFFFFFF) % 12000000;
-    return 1000000000 + base * 8 + slot;
+    return _kNoteIdBase - (base * 8 + slot);
   }
 }
 

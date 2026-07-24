@@ -3,6 +3,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:uuid/uuid.dart';
+import '../../core/utils/app_logger.dart';
 import 'hive_service.dart';
 import 'supabase_service.dart';
 
@@ -79,12 +80,24 @@ class SyncQueue extends ChangeNotifier {
   bool _draining = false;
   bool get isDraining => _draining;
 
+  /// Fired after a drain pass that successfully wrote at least one op, so a
+  /// bootstrap provider can invalidate the readers that would otherwise stay
+  /// stale post-drain (diary/water/habit-log caches — see SR-2). Not fired
+  /// for a no-op drain (empty queue, or every op failed/was dropped).
+  void Function()? onDrained;
+
   /// Current pending count. Reads from Hive each call so the value is
   /// always exact, not just an optimistic counter.
   int get queueDepth {
     final raw = _box.get(_key) as List?;
     return raw?.length ?? 0;
   }
+
+  /// Pending ops for one table, oldest-first — lets a read path merge
+  /// not-yet-synced inserts/updates/deletes into a Supabase fetch so the UI
+  /// never "loses" data the user believes is already saved (SR-1).
+  List<SyncOp> pendingOpsFor(String table) =>
+      _readAll().where((o) => o.table == table).toList();
 
   /// Best-effort connectivity check used by `OfflineWriter` to decide
   /// whether to try Supabase directly or enqueue immediately.
@@ -169,11 +182,13 @@ class SyncQueue extends ChangeNotifier {
 
   /// Drain pending ops oldest-first. Stops on first failure (likely network
   /// flake) and keeps remaining ops for the next drain pass. Retries beyond
-  /// 8 are dropped — they'd block the queue forever otherwise.
+  /// 8 are dropped — they'd block the queue forever otherwise (but reported,
+  /// see [_reportDropped]).
   Future<void> drain() async {
     if (_draining) return;
     _draining = true;
     notifyListeners();
+    var executed = 0;
     try {
       while (true) {
         final all = _readAll();
@@ -183,12 +198,14 @@ class SyncQueue extends ChangeNotifier {
           // Drop poison-pill op; keep going.
           final rest = all.sublist(1);
           await _writeAll(rest);
+          _reportDropped(next);
           continue;
         }
         try {
           await _execute(next);
           final rest = all.sublist(1);
           await _writeAll(rest);
+          executed++;
         } catch (e, s) {
           if (kDebugMode) debugPrint('SyncQueue execute failed for ${next.op}@${next.table}: $e\n$s');
           // Bump the head op's retry count and stop draining; the next
@@ -203,6 +220,35 @@ class SyncQueue extends ChangeNotifier {
     } finally {
       _draining = false;
       notifyListeners();
+      if (executed > 0) onDrained?.call();
+    }
+  }
+
+  /// An op that failed 8 times in a row is discarded rather than blocking the
+  /// queue forever. That used to happen silently — the user believed the
+  /// change was saved. Best-effort: surface it in the in-app notification
+  /// feed and the crash log; never let this throw back into `drain()`.
+  void _reportDropped(SyncOp op) {
+    logError(
+      'SyncQueue dropped poison-pill op after ${op.retries} retries: '
+      '${op.op}@${op.table} (id=${op.id})',
+    );
+    try {
+      final client = SupabaseService.client;
+      final userId = client.auth.currentUser?.id;
+      if (userId == null) return;
+      unawaited(
+        client.from('notifications').insert({
+          'user_id': userId,
+          'type': 'sync_dropped',
+          'title': "A change couldn't be saved",
+          'body': 'An offline change to your ${op.table.replaceAll('_', ' ')} '
+              "kept failing to sync and was discarded. You may need to redo it.",
+          'payload': {'table': op.table, 'op': op.op},
+        }).then((_) {}, onError: (_) {}),
+      );
+    } catch (_) {
+      // Offline/uninitialised — the client_errors report above still landed.
     }
   }
 

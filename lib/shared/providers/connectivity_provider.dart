@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/sync_queue.dart';
+import '../../features/food/providers/food_providers.dart';
 
 /// True when the device has *any* working network interface.
 /// Folds the `connectivity_plus` result list (Android/iOS report multiple
@@ -43,6 +44,20 @@ final connectivityProvider = StreamProvider<bool>((ref) {
 final isOfflineProvider = Provider<bool>((ref) {
   final v = ref.watch(connectivityProvider).valueOrNull;
   return v == false;
+});
+
+/// Wires [SyncQueue.onDrained] to invalidate the readers that would
+/// otherwise stay stale after a successful drain (SR-2): a queued food/water
+/// write only shows up once its provider is invalidated, and nothing did
+/// that before this. Read once from a bootstrap spot (`main.dart`) so the
+/// callback is registered for the life of the app; safe to read repeatedly
+/// (`Provider` caches after the first build).
+final syncDrainInvalidatorProvider = Provider<void>((ref) {
+  SyncQueue.instance.onDrained = () {
+    ref.invalidate(diaryEntriesProvider);
+    ref.invalidate(waterIntakeProvider);
+  };
+  ref.onDispose(() => SyncQueue.instance.onDrained = null);
 });
 
 /// Current sync-queue depth — used by the pill to show "N pending".

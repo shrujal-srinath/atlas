@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
+import '../../../shared/services/hive_service.dart';
 import '../../../shared/services/offline_writer.dart';
 import '../../../shared/services/supabase_service.dart';
+import '../../../shared/services/sync_queue.dart';
 import '../../../shared/models/models.dart';
 import '../domain/food.dart';
 import '../domain/meal_entry.dart';
@@ -607,17 +610,69 @@ class FoodRepository {
       '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   /// All entries for a given diary date.
+  ///
+  /// Read-through the `food_logs_cache` Hive box + the pending `SyncQueue`
+  /// (SR-1): a fetch failure (offline) falls back to the last-good cached
+  /// rows instead of surfacing an error/empty diary, and — success or
+  /// failure — any not-yet-synced insert/update/delete for this date is
+  /// merged in, so a meal logged (or removed) while offline never
+  /// "vanishes" until the queue happens to drain.
   Future<List<MealEntry>> entriesForDate(DateTime d) async {
     final ds = _dateStr(d);
-    final rows = await SupabaseService.client
-        .from('food_logs')
-        .select()
-        .eq('date', ds)
-        .order('created_at');
-    return (rows as List)
-        .cast<Map<String, dynamic>>()
-        .map(MealEntry.fromJson)
-        .toList();
+    final cacheKey = 'byDate:$ds';
+    List<Map<String, dynamic>> rows;
+    try {
+      final fetched = await SupabaseService.client
+          .from('food_logs')
+          .select()
+          .eq('date', ds)
+          .order('created_at');
+      rows = (fetched as List).cast<Map<String, dynamic>>();
+      unawaited(HiveService.put(HiveService.foodLogsBox, cacheKey, rows));
+      unawaited(HiveService.stamp(HiveService.foodLogsBox, cacheKey));
+    } catch (_) {
+      final cached = HiveService.get<List>(HiveService.foodLogsBox, cacheKey);
+      rows = cached == null
+          ? const []
+          : cached
+              .cast<Map>()
+              .map((m) => Map<String, dynamic>.from(m))
+              .toList();
+    }
+    final merged = _mergePendingFoodLogOps(rows, ds);
+    return merged.map(MealEntry.fromJson).toList();
+  }
+
+  /// Overlays pending `food_logs` [SyncQueue] ops onto [base] rows for date
+  /// [ds]: unsynced inserts appear, unsynced updates patch in place, unsynced
+  /// deletes are hidden — whether [base] came from a live fetch or the cache.
+  List<Map<String, dynamic>> _mergePendingFoodLogOps(
+    List<Map<String, dynamic>> base,
+    String ds,
+  ) {
+    final ops = SyncQueue.instance.pendingOpsFor('food_logs');
+    if (ops.isEmpty) return base;
+    final byId = {
+      for (final r in base)
+        if (r['id'] is String) r['id'] as String: r,
+    };
+    for (final op in ops) {
+      switch (op.op) {
+        case 'insert':
+          if (op.payload['date'] == ds) {
+            final id = op.payload['id'] as String?;
+            if (id != null) byId[id] = op.payload;
+          }
+        case 'update':
+          final id = op.matchId;
+          if (id != null && byId.containsKey(id)) {
+            byId[id] = {...byId[id]!, ...op.payload};
+          }
+        case 'delete':
+          if (op.matchId != null) byId.remove(op.matchId);
+      }
+    }
+    return byId.values.toList();
   }
 
   /// Entries between [start] and [end] inclusive, bucketed by date-only.

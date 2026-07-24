@@ -1,4 +1,4 @@
-# ATLAS — Deployment checklist (Android / Google Play)
+# STRIDE — Deployment checklist (Android / Google Play)
 
 Android-first. iOS is not set up (no `ios/` folder) — add later with
 `flutter create --platforms=ios .` if/when you want it.
@@ -7,8 +7,8 @@ Android-first. iOS is not set up (no `ios/` folder) — add later with
 Generate a release upload key (keep the file + passwords safe and OUT of git):
 
 ```bash
-keytool -genkey -v -keystore ~/atlas-upload.jks \
-  -keyalg RSA -keysize 2048 -validity 10000 -alias atlas
+keytool -genkey -v -keystore ~/stride-upload.jks \
+  -keyalg RSA -keysize 2048 -validity 10000 -alias stride
 ```
 
 Then create `android/key.properties` (already git-ignored via the gradle wiring;
@@ -17,8 +17,8 @@ verify it's in `.gitignore`):
 ```properties
 storePassword=<the store password you chose>
 keyPassword=<the key password you chose>
-keyAlias=atlas
-storeFile=/Users/<you>/atlas-upload.jks
+keyAlias=stride
+storeFile=/Users/<you>/stride-upload.jks
 ```
 
 `android/app/build.gradle.kts` already reads this file and uses it for the
@@ -26,8 +26,10 @@ release `signingConfig` (falls back to debug keys only when the file is absent).
 Do **not** lose this key — Play ties your app to it permanently.
 
 ## 2. Application ID
-Set to `com.shrujalsrinath.atlas` in `android/app/build.gradle.kts`. **Permanent
-once published** — change it now if you want a different one.
+Set to `com.shrujalsrinath.stride` in `android/app/build.gradle.kts`. **Permanent
+once published.** The OAuth deep-link scheme is `io.stride.app://login-callback/`
+(AndroidManifest + `auth_provider.dart`) — this exact string must be in the Supabase
+dashboard's Auth → Redirect URLs for Google sign-in to complete.
 
 ## 3. Build the release artifact
 The dev-access bypass (demo login → mock data) now **defaults to disabled** —
@@ -43,6 +45,8 @@ To test the demo-login shortcut locally, opt in explicitly instead:
 ```bash
 flutter run --dart-define=ATLAS_DEV_ACCESS=true
 ```
+(the flag name stays the internal codename `ATLAS_DEV_ACCESS` — display branding
+and the code identifier are intentionally split, see root `CLAUDE.md` §1.)
 
 ## 4. Privacy policy & terms (store blocker)
 - Host `docs/PRIVACY.md` and `docs/TERMS.md` at public URLs.
@@ -69,5 +73,5 @@ Declare the following (collected, linked to the user, not shared, not sold):
       transitions; the "Inter font failed" message is web-only).
 - [ ] Verify sign-up → onboarding → core flows with a brand-new account.
 - [ ] Confirm `client_errors` migration is applied (crash reporting).
-- [ ] Store listing: title "ATLAS", screenshots, short/full description, icon.
+- [ ] Store listing: title "STRIDE", screenshots, short/full description, icon.
 - [ ] `flutter analyze` clean · `flutter test` green (158 tests).

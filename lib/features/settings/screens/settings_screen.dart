@@ -42,9 +42,12 @@ const _activityOptions = {
   'athlete': 'Athlete',
 };
 
-// TODO: replace with the hosted legal documents before store submission.
-const _privacyPolicyUrl = 'https://atlas.app/privacy';
-const _termsUrl = 'https://atlas.app/terms';
+// Hosted via GitHub Pages from the /docs folder of the public atlas repo —
+// enable once at github.com/shrujal-srinath/atlas → Settings → Pages →
+// Source: Deploy from a branch → main / docs.
+const _privacyPolicyUrl =
+    'https://shrujal-srinath.github.io/atlas/privacy.html';
+const _termsUrl = 'https://shrujal-srinath.github.io/atlas/terms.html';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -192,7 +195,7 @@ class _Body extends ConsumerWidget {
         // Version as a footer caption — it doesn't earn a card.
         Center(
           child: Text(
-            'ATLAS · v1.0.0+1',
+            'STRIDE · v1.0.0+1',
             style: AppType.meta.copyWith(color: c.textDim),
           ),
         ),

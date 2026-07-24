@@ -16,6 +16,7 @@ import 'features/notifications/weather_nudge_provider.dart';
 import 'features/notes/providers/note_reminders_runner_provider.dart';
 import 'features/xp/level_up_overlay.dart';
 import 'features/xp/leveling_providers.dart';
+import 'shared/providers/connectivity_provider.dart';
 import 'shared/services/hive_service.dart';
 import 'shared/services/supabase_service.dart';
 import 'shared/services/notification_service.dart';
@@ -178,6 +179,8 @@ class _AtlasAppState extends ConsumerState<AtlasApp> {
     ref.read(reminderRunnerProvider);
     // Keep note reminders in sync with the notes table.
     ref.read(noteRemindersRunnerProvider);
+    // Refresh diary/water reads once a sync-queue drain lands (SR-2).
+    ref.read(syncDrainInvalidatorProvider);
   }
 
   @override
@@ -207,7 +210,7 @@ class _AtlasAppState extends ConsumerState<AtlasApp> {
     );
 
     return MaterialApp.router(
-      title: 'ATLAS',
+      title: 'STRIDE',
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
       themeMode: mode,

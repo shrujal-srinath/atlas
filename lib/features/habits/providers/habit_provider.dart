@@ -6,7 +6,14 @@ import '../../../core/dev/dev_mode.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../food/providers/food_providers.dart';
 
-final selectedDateProvider = StateProvider<DateTime>((ref) => DateTime.now());
+/// Date-only (no time-of-day) so family providers keyed by [DateTime]
+/// (`homeScoreProvider`, `homeTasksProvider`) share a cache key with the week
+/// strip / day rail, which always write date-only values here. A seed with a
+/// full timestamp used to cause today's tasks/score to compute twice.
+final selectedDateProvider = StateProvider<DateTime>((ref) {
+  final now = DateTime.now();
+  return DateTime(now.year, now.month, now.day);
+});
 
 /// Demo/dev only: in-memory habit-log overrides keyed by `'habitId|date'`. The
 /// demo has no Supabase session, so [HabitActionsNotifier.toggleHabit] writes
