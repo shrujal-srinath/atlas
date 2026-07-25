@@ -1,3 +1,7 @@
+-- APPLIED to prod 2026-07-25 (verified live: cache_branded_food inserts +
+-- upserts with clamped values, rejects a malformed barcode, `anon` has no
+-- EXECUTE, RLS/policies confirmed via pg_policies + pg_class).
+--
 -- P1-1 (SECURITY_AUDIT_2026-07-02.md finding 1b / FUTURE_PLANS.md P1-1):
 -- food_catalog is a SHARED table every user's search reads from. The
 -- policies added in 20260622_food_barcode.sql let any authenticated user
@@ -116,5 +120,12 @@ begin
 end;
 $$;
 
+-- `revoke ... from public` alone does NOT strip the EXECUTE grant Supabase's
+-- default schema privileges hand `anon` on every new function — verified
+-- live (2026-07-25): anon still had EXECUTE after just the line above.
+-- Revoke it explicitly so only signed-in users (and the function's own
+-- SECURITY DEFINER context) can call this write path.
 revoke all on function public.cache_branded_food(jsonb) from public;
+revoke execute on function public.cache_branded_food(jsonb) from anon;
 grant execute on function public.cache_branded_food(jsonb) to authenticated;
+revoke execute on function public._clamp_food_field(jsonb, text, numeric) from anon, authenticated, public;

@@ -1,3 +1,13 @@
+-- NOT APPLIED — verified 2026-07-25 that a `habit_logs_habit_id_date_key`
+-- unique(habit_id, date) constraint already exists in prod (predates this
+-- file; origin unclear, possibly always part of the baseline schema). Ran
+-- this migration's checks manually instead of the file: zero duplicate
+-- rows currently exist, so the constraint already fully protects the
+-- client's upsert(onConflict: 'habit_id,date') change in toggleHabit/
+-- setRestDay. Left in the migrations directory for the historical record
+-- and in case a future environment (e.g. a fresh branch) genuinely lacks
+-- it — running it there would be a legitimate no-op-or-fix, not harmful.
+--
 -- SR-6 (SHIP_READINESS.md): toggleHabit / setRestDay do a select-then-
 -- insert-or-update against habit_logs, which is not atomic — two rapid taps
 -- (double-tap, or two devices) can both see "no existing row" and both
