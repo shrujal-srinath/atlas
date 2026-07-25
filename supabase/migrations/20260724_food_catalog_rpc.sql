@@ -29,6 +29,7 @@ create or replace function public._clamp_food_field(payload jsonb, key text, hi 
 returns numeric
 language sql
 immutable
+set search_path = public, pg_temp
 as $$
   select greatest(least(coalesce((payload->>key)::numeric, 0), hi), 0)
 $$;
