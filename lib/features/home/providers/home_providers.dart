@@ -10,6 +10,7 @@ import '../../../shared/models/models.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../food/providers/food_providers.dart';
 import '../../habits/providers/habit_provider.dart';
+import '../../../shared/providers/today_provider.dart';
 import '../scoring/focus.dart';
 import '../scoring/section_def.dart';
 import '../scoring/score_engine.dart';
@@ -266,9 +267,10 @@ final homeScoreProvider =
   }
   // Blend nutrition into the body section for today (live) and past days
   // (time-travel). Future days have no food logged yet → habit-only.
-  final now = DateTime.now();
+  // Watches todayDateProvider (SR-3) so a midnight rollover recomputes this
+  // instead of comparing against whatever "now" was when this last rebuilt.
+  final todayOnly = ref.watch(todayDateProvider);
   final dateOnly = DateTime(date.year, date.month, date.day);
-  final todayOnly = DateTime(now.year, now.month, now.day);
   final isToday = dateOnly == todayOnly;
   final isFuture = dateOnly.isAfter(todayOnly);
   double? nutritionRatio;
@@ -303,7 +305,7 @@ final homeScoreProvider =
 /// 7-day window centred on [anchor] (3 before, anchor, 3 after).
 final homeWeekProvider =
     FutureProvider.family<List<HomeWeekDay>, DateTime>((ref, anchor) async {
-  final today = DateTime.now();
+  final today = ref.watch(todayDateProvider);
   final todayKey = _dateKey(today);
   final out = <HomeWeekDay>[];
   for (int i = -3; i <= 3; i++) {
@@ -359,9 +361,7 @@ final dailyScoreSeriesProvider =
   final nutritionByDate =
       await ref.watch(nutritionRatiosForRangeProvider(days).future);
   final liveToday = ref.watch(todayNutritionRatioProvider);
-
-  final n = DateTime.now();
-  final today = DateTime(n.year, n.month, n.day);
+  final today = ref.watch(todayDateProvider);
 
   // Logs grouped by date → habit for O(1) lookup while walking the window.
   final logsByDate = <String, Map<String, HabitLog>>{};
@@ -404,4 +404,24 @@ final dailyScoreSeriesProvider =
     ));
   }
   return out;
+});
+
+/// Keeps [selectedDateProvider] (home day rail) and [diaryDateProvider] (food
+/// diary) pinned to the real today across a midnight rollover (SR-3) — but
+/// only when the user was passively viewing "today" (its value equalled the
+/// day that just ended); deliberately browsing a past/future date is left
+/// alone. Lives here (not `shared/`) because it needs both the food and
+/// habits providers, which only a feature that already depends on both
+/// (home) can reach without a layering cycle. Read once from a bootstrap
+/// spot (`main.dart`), same pattern as `syncDrainInvalidatorProvider`.
+final todayRolloverBootstrapProvider = Provider<void>((ref) {
+  ref.listen<DateTime>(todayDateProvider, (prev, next) {
+    if (prev == null || prev == next) return;
+    if (ref.read(selectedDateProvider) == prev) {
+      ref.read(selectedDateProvider.notifier).state = next;
+    }
+    if (ref.read(diaryDateProvider) == prev) {
+      ref.read(diaryDateProvider.notifier).state = next;
+    }
+  });
 });

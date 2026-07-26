@@ -11,6 +11,7 @@ import 'core/router/app_router.dart';
 import 'features/achievements/achievement_overlay.dart';
 import 'features/auth/providers/auth_provider.dart';
 import 'features/food/widgets/nutrition_xp_listener.dart';
+import 'features/home/providers/home_providers.dart';
 import 'features/notifications/providers/reminder_runner_provider.dart';
 import 'features/notifications/weather_nudge_provider.dart';
 import 'features/notes/providers/note_reminders_runner_provider.dart';
@@ -181,6 +182,8 @@ class _AtlasAppState extends ConsumerState<AtlasApp> {
     ref.read(noteRemindersRunnerProvider);
     // Refresh diary/water reads once a sync-queue drain lands (SR-2).
     ref.read(syncDrainInvalidatorProvider);
+    // Keep "today" correct across a midnight rollover (SR-3).
+    ref.read(todayRolloverBootstrapProvider);
   }
 
   @override

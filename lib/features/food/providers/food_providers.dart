@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/dev/dev_mode.dart';
+import '../../../shared/providers/today_provider.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../../shared/models/models.dart';
 import '../data/food_repository.dart';
@@ -341,17 +342,12 @@ final nutritionRatioProvider = Provider<double>((ref) {
   );
 });
 
-DateTime _todayDate() {
-  final n = DateTime.now();
-  return DateTime(n.year, n.month, n.day);
-}
-
 /// Today's entries, fetched independently of the diary's selected date. Only
 /// consulted when the diary is browsing another day — see
 /// [todayNutritionRatioProvider].
 final _todayEntriesProvider =
     FutureProvider.autoDispose<List<MealEntry>>((ref) async {
-  final today = _todayDate();
+  final today = ref.watch(todayDateProvider);
   if (ref.watch(devModeProvider)) return generateMockFoodEntries(today);
   final repo = ref.watch(foodRepositoryProvider);
   return repo.entriesForDate(today);
@@ -368,7 +364,7 @@ final _todayEntriesProvider =
 /// keeps the ratio live. While browsing another date no entry can be added
 /// to today, so the independent fetch can't go stale.
 final todayNutritionRatioProvider = Provider<double>((ref) {
-  if (ref.watch(diaryDateProvider) == _todayDate()) {
+  if (ref.watch(diaryDateProvider) == ref.watch(todayDateProvider)) {
     return ref.watch(nutritionRatioProvider);
   }
   final entries =
@@ -400,8 +396,7 @@ final nutritionRatiosForRangeProvider =
     FutureProvider.autoDispose.family<Map<DateTime, double>, int>((ref, days) async {
   final targets = ref.watch(dailyTargetsProvider);
   final phase = ref.watch(bodyPhaseProvider);
-  final n = DateTime.now();
-  final today = DateTime(n.year, n.month, n.day);
+  final today = ref.watch(todayDateProvider);
   final start = today.subtract(Duration(days: days - 1));
 
   Map<DateTime, List<MealEntry>> byDate;
