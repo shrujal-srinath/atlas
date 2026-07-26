@@ -345,7 +345,7 @@ final nutritionRatioProvider = Provider<double>((ref) {
 /// Today's entries, fetched independently of the diary's selected date. Only
 /// consulted when the diary is browsing another day — see
 /// [todayNutritionRatioProvider].
-final _todayEntriesProvider =
+final todayEntriesProvider =
     FutureProvider.autoDispose<List<MealEntry>>((ref) async {
   final today = ref.watch(todayDateProvider);
   if (ref.watch(devModeProvider)) return generateMockFoodEntries(today);
@@ -368,7 +368,7 @@ final todayNutritionRatioProvider = Provider<double>((ref) {
     return ref.watch(nutritionRatioProvider);
   }
   final entries =
-      ref.watch(_todayEntriesProvider).valueOrNull ?? const <MealEntry>[];
+      ref.watch(todayEntriesProvider).valueOrNull ?? const <MealEntry>[];
   final totals =
       entries.fold<Nutrients>(Nutrients.zero, (acc, e) => acc + e.totals);
   final targets = ref.watch(dailyTargetsProvider);

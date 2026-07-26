@@ -10,7 +10,17 @@ import '../providers/food_providers.dart';
 /// Quick-add: log raw kcal + optional macros when you can't search a food.
 class QuickAddSheet extends ConsumerStatefulWidget {
   final DateTime date;
-  const QuickAddSheet({super.key, required this.date});
+  /// Preselects the meal slot. Combine with [lockSlot] to pin it (e.g. the
+  /// meal-completion gate must log into the habit's own slot, or the
+  /// pending-calories check in food_providers.dart can't clear).
+  final MealTimeSlot? initialSlot;
+  final bool lockSlot;
+  const QuickAddSheet({
+    super.key,
+    required this.date,
+    this.initialSlot,
+    this.lockSlot = false,
+  });
 
   @override
   ConsumerState<QuickAddSheet> createState() => _QuickAddSheetState();
@@ -22,7 +32,7 @@ class _QuickAddSheetState extends ConsumerState<QuickAddSheet> {
   final _carbs = TextEditingController();
   final _fat = TextEditingController();
   final _name = TextEditingController(text: 'Quick add');
-  MealTimeSlot _slot = MealTimeSlot.snack;
+  late MealTimeSlot _slot = widget.initialSlot ?? MealTimeSlot.snack;
   bool _saving = false;
 
   @override
@@ -116,22 +126,26 @@ class _QuickAddSheetState extends ConsumerState<QuickAddSheet> {
             ),
             const SizedBox(height: 18),
 
-            // Meal slot
-            Text('MEAL', style: AppType.overline.copyWith(color: c.textMuted)),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final s in kDiarySlotOrder)
-                  _Chip(
-                    label: s.label,
-                    active: s == _slot,
-                    onTap: () => setState(() => _slot = s),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 22),
+            // Meal slot — hidden when locked to the caller's slot (the
+            // meal-completion gate must log into the habit's own slot).
+            if (!widget.lockSlot) ...[
+              Text('MEAL', style: AppType.overline.copyWith(color: c.textMuted)),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final s in kDiarySlotOrder)
+                    _Chip(
+                      label: s.label,
+                      active: s == _slot,
+                      onTap: () => setState(() => _slot = s),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 22),
+            ] else
+              const SizedBox(height: 4),
 
             SizedBox(
               width: double.infinity,

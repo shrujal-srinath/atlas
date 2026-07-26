@@ -156,6 +156,8 @@ class _DayRailState extends ConsumerState<_DayRail> {
   Widget build(BuildContext context) {
     final c = context.c;
     final sorted = _sorted();
+    final pendingMealHabits = ref.watch(pendingMealHabitsProvider);
+    final pendingById = {for (final h in pendingMealHabits) h.id: h};
 
     if (sorted.isEmpty) {
       return _Card(
@@ -226,10 +228,22 @@ class _DayRailState extends ConsumerState<_DayRail> {
       } else {
         final t = s.task!;
         if (t.done) {
+          final pendingHabit = pendingById[t.id];
           rows.add(_DoneRow(
             task: t,
             onTapNode: () => widget.onToggle(t),
             onTapRow: () => _openSheet(t),
+            pendingMealSlot:
+                pendingHabit == null ? null : flexibleMealSlotOf(pendingHabit),
+            onTapPendingBadge: pendingHabit == null
+                ? null
+                : () => showMealResolveSheet(
+                      context,
+                      ref,
+                      habit: pendingHabit,
+                      slot: flexibleMealSlotOf(pendingHabit)!,
+                      date: ref.read(todayDateProvider),
+                    ),
           ));
         } else if (t.isRest && t.id != expandedId) {
           // A deliberate rest reads as a calm receipt — tap to reopen it (so the
@@ -623,11 +637,18 @@ class _DoneRow extends StatelessWidget {
   /// Rested receipt variant — a neutral "Rest day" line instead of a struck-out
   /// completion. Used for flexible-count habits the user rested today.
   final bool rested;
+  /// Non-null when this is a Flexible meal habit completed today with no
+  /// calories logged yet — shows a "tap to add calories" badge instead of
+  /// the usual streak flame.
+  final MealTimeSlot? pendingMealSlot;
+  final VoidCallback? onTapPendingBadge;
   const _DoneRow({
     required this.task,
     required this.onTapNode,
     required this.onTapRow,
     this.rested = false,
+    this.pendingMealSlot,
+    this.onTapPendingBadge,
   });
 
   @override
@@ -677,6 +698,37 @@ class _DoneRow extends StatelessWidget {
                     fontWeight: FontWeight.w700,
                     color: c.textMuted,
                     height: 1.0,
+                  ),
+                ),
+              ] else if (pendingMealSlot != null) ...[
+                GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: onTapPendingBadge,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: c.surface,
+                      borderRadius: BorderRadius.circular(AppRadii.pill),
+                      border: Border.all(color: c.amber.withValues(alpha: 0.5)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(LucideIcons.flame, size: 10, color: c.amber),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Add calories',
+                          style: TextStyle(
+                            fontFamily: 'Inter',
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: c.textSecondary,
+                            height: 1.0,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ] else if (task.streak > 0) ...[
@@ -911,12 +963,20 @@ class _ExpandedRowState extends ConsumerState<_ExpandedRow> {
   void _persist() {
     _dirty = false;
     final t = widget.task;
-    ref.read(habitActionsProvider.notifier).toggleHabit(
-          t.id,
-          _dateKey,
-          completed: _value >= (t.target ?? double.infinity) - 1e-9,
-          actualValue: _value,
-        );
+    // Defense-in-depth: a meal habit's goal is locked to none at creation
+    // (habit_creation_screen.dart), so this numeric path should be
+    // unreachable for one — routed through the gate anyway in case that
+    // ever changes.
+    completeHabitGated(
+      context,
+      ref,
+      t.id,
+      _dateKey,
+      habit: t.habitRef,
+      wasCompleted: t.done,
+      completed: _value >= (t.target ?? double.infinity) - 1e-9,
+      actualValue: _value,
+    );
   }
 
   void _bump(double delta) {
@@ -945,12 +1005,18 @@ class _ExpandedRowState extends ConsumerState<_ExpandedRow> {
     final t = widget.task;
     if (t.isNumeric) {
       final v = math.max(_value, t.target ?? 0);
-      ref.read(habitActionsProvider.notifier).toggleHabit(
-            t.id,
-            _dateKey,
-            completed: true,
-            actualValue: v,
-          );
+      // Defense-in-depth, see _persist above — a meal habit's goal is locked
+      // to none at creation, so this should be unreachable for one.
+      completeHabitGated(
+        context,
+        ref,
+        t.id,
+        _dateKey,
+        habit: t.habitRef,
+        wasCompleted: t.done,
+        completed: true,
+        actualValue: v,
+      );
     } else {
       widget.onComplete();
     }

@@ -15,6 +15,7 @@ import '../../../core/theme/app_icons.dart';
 import '../../../shared/models/models.dart';
 import '../scoring/section_def.dart';
 import '../../habits/providers/habit_provider.dart';
+import '../../habits/widgets/meal_completion_gate.dart';
 import '../../habits/widgets/urge_surf_modal.dart';
 
 part 'habit_log_widgets.dart';
@@ -198,16 +199,18 @@ class _HabitLogSheetState extends ConsumerState<_HabitLogSheet> {
               urgeOnly: _breakingOutcome == _BreakingOutcome.urgeOnly,
             );
       } else {
-        await ref
-            .read(habitActionsProvider.notifier)
-            .toggleHabit(
-              widget.habit.id,
-              widget.dateStr,
-              completed: _isDone,
-              effortRating: _effortRating,
-              note: _noteCtrl.text,
-              actualValue: _hasNumericGoal ? _currentValue : null,
-            );
+        await completeHabitGated(
+          context,
+          ref,
+          widget.habit.id,
+          widget.dateStr,
+          habit: widget.habit,
+          wasCompleted: widget.log?.completed ?? false,
+          completed: _isDone,
+          effortRating: _effortRating,
+          note: _noteCtrl.text,
+          actualValue: _hasNumericGoal ? _currentValue : null,
+        );
       }
       if (mounted && closeOnSuccess) Navigator.of(context).pop();
     } finally {

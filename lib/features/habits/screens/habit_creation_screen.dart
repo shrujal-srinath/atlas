@@ -10,6 +10,7 @@ import '../../../core/theme/app_icons.dart';
 import '../../../shared/models/models.dart';
 import '../../../shared/services/notification_service.dart';
 import '../../auth/providers/auth_provider.dart';
+import '../../food/domain/food.dart'; // Nutrients
 import '../../food/domain/meal_entry.dart'; // MealTimeSlotX, kDiarySlotOrder
 import '../../food/providers/food_providers.dart'; // foodRepositoryProvider
 import '../../food/screens/food_detail_screen.dart'; // FoodSelection
@@ -262,8 +263,12 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
     // Only touch the `food_link` column when the feature is actually in play,
     // so tasks that don't use it keep saving even before the DB migration is
     // applied. Send an explicit null only to *clear* a link the task used to
-    // have (toggled off on edit).
-    final hasLink = !_isBreaking && _foodLink != null && _foodLink!.isNotEmpty;
+    // have (toggled off on edit). A Flexible link is "in play" with zero
+    // items — it's the whole point of Flexible — so isNotEmpty alone would
+    // silently drop it, same bug HabitFoodLink.fromRaw had.
+    final hasLink = !_isBreaking &&
+        _foodLink != null &&
+        (_foodLink!.isNotEmpty || _foodLink!.isFlexible);
     final hadLink = widget.existing?.foodLinkRaw != null;
     if (hasLink) {
       payload['food_link'] = _foodLink!.toJson();
@@ -543,7 +548,14 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
                 ? 'Replacement & how to track'
                 : 'How much counts as done',
             children: [
-              if (!_isBreaking) ...[
+              if (!_isBreaking && _foodLink?.isFlexible == true) ...[
+                _Label('Daily goal'),
+                const SizedBox(height: 8),
+                _MutedHintRow(
+                  icon: LucideIcons.target,
+                  text: "Off — a flexible meal is simple done/not-done",
+                ),
+              ] else if (!_isBreaking) ...[
                 _Label('Daily goal'),
                 const SizedBox(height: 8),
                 _PickerRow(
@@ -618,9 +630,11 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
                   label: 'Log food when done',
                   sub: _foodLink == null
                       ? 'Off'
-                      : '${_foodLink!.items.length} '
-                          'food${_foodLink!.items.length == 1 ? '' : 's'} · '
-                          '${_foodLink!.slot.label}',
+                      : _foodLink!.isFlexible
+                          ? 'Flexible · ${_foodLink!.slot.label}'
+                          : '${_foodLink!.items.length} '
+                              'food${_foodLink!.items.length == 1 ? '' : 's'} · '
+                              '${_foodLink!.slot.label}',
                   value: _foodLink != null,
                   accent: _accent,
                   onChanged: _toggleFoodLink,
@@ -631,9 +645,11 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
                     link: _foodLink!,
                     accent: _accent,
                     busy: _addingFood,
+                    onFlexibleChanged: _setFoodLinkFlexible,
                     onSlotChanged: (s) => setState(
                         () => _foodLink = _foodLink!.copyWith(slot: s)),
                     onAddItem: _addFoodItem,
+                    onAddManualItem: _addManualFoodItem,
                     onRemoveItem: _removeFoodItem,
                   ),
                 ],
@@ -801,6 +817,25 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
     setState(() => _foodLink = on ? (_foodLink ?? HabitFoodLink.empty) : null);
   }
 
+  /// Switches between a Fixed (preset foods, auto-logged) and Flexible (no
+  /// preset — completing the habit opens a decision gate instead) meal link.
+  /// A Flexible meal is binary done/not-done, so switching to it clears any
+  /// numeric goal — there is no "12/20 reps" equivalent for "did you eat".
+  void _setFoodLinkFlexible(bool flexible) {
+    setState(() {
+      final link = _foodLink ?? HabitFoodLink.empty;
+      _foodLink = link.copyWith(
+        isFlexible: flexible,
+        items: flexible ? const [] : link.items,
+      );
+      if (flexible) {
+        _goalType = null;
+        _goalUnit = null;
+        _goalCtrl.clear();
+      }
+    });
+  }
+
   Future<void> _addFoodItem() async {
     final selection = await showModalBottomSheet<FoodSelection>(
       context: context,
@@ -837,6 +872,23 @@ class _HabitCreationScreenState extends ConsumerState<HabitCreationScreen> {
       final link = _foodLink ?? HabitFoodLink.empty;
       _foodLink = link.copyWith(items: [...link.items, item]);
       _addingFood = false;
+    });
+  }
+
+  /// Adds a `HabitFoodLinkItem` without a food-database lookup — just a
+  /// name + calories, for a food you know the numbers for by heart.
+  Future<void> _addManualFoodItem() async {
+    final item = await showModalBottomSheet<HabitFoodLinkItem>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      useSafeArea: true,
+      builder: (_) => const _ManualFoodEntrySheet(),
+    );
+    if (item == null || !mounted) return;
+    setState(() {
+      final link = _foodLink ?? HabitFoodLink.empty;
+      _foodLink = link.copyWith(items: [...link.items, item]);
     });
   }
 

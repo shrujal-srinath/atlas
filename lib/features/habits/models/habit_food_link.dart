@@ -12,8 +12,17 @@ import '../../food/domain/meal_entry.dart';
 class HabitFoodLink {
   final MealTimeSlot slot;
   final List<HabitFoodLinkItem> items;
+  /// A Flexible meal habit has no preset items — completing it opens a
+  /// decision gate (enter calories / log food / skip) instead of auto-logging
+  /// anything. Always paired with empty [items]; mutually exclusive in
+  /// practice with a Fixed link (which always has 1+ items).
+  final bool isFlexible;
 
-  const HabitFoodLink({required this.slot, required this.items});
+  const HabitFoodLink({
+    required this.slot,
+    required this.items,
+    this.isFlexible = false,
+  });
 
   /// An empty link, defaulting to the Snack slot.
   static const empty = HabitFoodLink(slot: MealTimeSlot.snack, items: []);
@@ -24,28 +33,42 @@ class HabitFoodLink {
   double get totalKcal =>
       items.fold<double>(0, (sum, i) => sum + i.totals.kcal);
 
-  HabitFoodLink copyWith({MealTimeSlot? slot, List<HabitFoodLinkItem>? items}) =>
-      HabitFoodLink(slot: slot ?? this.slot, items: items ?? this.items);
+  HabitFoodLink copyWith({
+    MealTimeSlot? slot,
+    List<HabitFoodLinkItem>? items,
+    bool? isFlexible,
+  }) =>
+      HabitFoodLink(
+        slot: slot ?? this.slot,
+        items: items ?? this.items,
+        isFlexible: isFlexible ?? this.isFlexible,
+      );
 
   /// Parse the raw `food_link` jsonb stored on a habit row. Returns null when
-  /// absent or malformed so callers can treat "no link" uniformly.
+  /// absent or malformed so callers can treat "no link" uniformly. A link is
+  /// valid with either 1+ items (Fixed) or `is_flexible: true` (Flexible,
+  /// always zero items) — empty items alone used to be treated as "no link
+  /// at all", which silently discarded every Flexible link ever saved.
   static HabitFoodLink? fromRaw(Map<String, dynamic>? raw) {
     if (raw == null) return null;
+    final isFlexible = raw['is_flexible'] as bool? ?? false;
     final itemsJson = (raw['items'] as List?) ?? const [];
     final items = itemsJson
         .whereType<Map<String, dynamic>>()
         .map(HabitFoodLinkItem.fromJson)
         .toList();
-    if (items.isEmpty) return null;
+    if (items.isEmpty && !isFlexible) return null;
     return HabitFoodLink(
       slot: _slotFromDb(raw['slot'] as String?),
       items: items,
+      isFlexible: isFlexible,
     );
   }
 
   Map<String, dynamic> toJson() => {
         'slot': slot.dbValue,
         'items': items.map((i) => i.toJson()).toList(),
+        if (isFlexible) 'is_flexible': true,
       };
 }
 

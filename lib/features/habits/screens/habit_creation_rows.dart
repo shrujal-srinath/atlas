@@ -522,6 +522,48 @@ class _PickerRow extends StatelessWidget {
   }
 }
 
+/// A non-interactive row matching [_PickerRow]'s shape — used to show a
+/// field is deliberately locked/off (no chevron, muted icon+text) rather
+/// than hiding it entirely, so the reason is legible instead of just absent.
+class _MutedHintRow extends StatelessWidget {
+  final IconData icon;
+  final String text;
+  const _MutedHintRow({required this.icon, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(10, 10, 12, 10),
+      decoration: BoxDecoration(
+        color: c.surfaceElevated,
+        borderRadius: BorderRadius.circular(AppRadii.card),
+        border: Border.all(color: c.border, width: 0.5),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: c.textMuted.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, size: 17, color: c.textMuted),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              text,
+              style: context.t.body.copyWith(color: c.textMuted),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _IconPicker extends StatefulWidget {
   final String selected;
   final Color tint;
@@ -777,15 +819,19 @@ class _FoodLinkEditor extends StatelessWidget {
   final HabitFoodLink link;
   final Color accent;
   final bool busy;
+  final ValueChanged<bool> onFlexibleChanged;
   final ValueChanged<MealTimeSlot> onSlotChanged;
   final VoidCallback onAddItem;
+  final VoidCallback onAddManualItem;
   final ValueChanged<int> onRemoveItem;
   const _FoodLinkEditor({
     required this.link,
     required this.accent,
     required this.busy,
+    required this.onFlexibleChanged,
     required this.onSlotChanged,
     required this.onAddItem,
+    required this.onAddManualItem,
     required this.onRemoveItem,
   });
 
@@ -796,6 +842,16 @@ class _FoodLinkEditor extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        _Segmented(
+          items: const [
+            _Seg('Fixed', icon: LucideIcons.utensils),
+            _Seg('Flexible', icon: LucideIcons.shuffle),
+          ],
+          index: link.isFlexible ? 1 : 0,
+          colorFor: (_) => accent,
+          onChanged: (i) => onFlexibleChanged(i == 1),
+        ),
+        const SizedBox(height: 14),
         _Label('Log to'),
         const SizedBox(height: 8),
         Wrap(
@@ -811,10 +867,8 @@ class _FoodLinkEditor extends StatelessWidget {
               ),
           ],
         ),
-        const SizedBox(height: 16),
-        _Label('Foods'),
-        const SizedBox(height: 8),
-        if (link.items.isEmpty)
+        if (link.isFlexible) ...[
+          const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
@@ -823,52 +877,213 @@ class _FoodLinkEditor extends StatelessWidget {
               border: Border.all(color: c.border, width: 0.5),
             ),
             child: Text(
-              'Add the foods this task logs — each with the quantity you take.',
+              "No preset food — you'll be asked to enter calories, log the "
+              'real food, or skip it for later each time you complete this.',
               style: t.body.copyWith(color: c.textMuted),
             ),
-          )
-        else
-          Column(
-            children: [
-              for (var i = 0; i < link.items.length; i++) ...[
-                _FoodLinkItemRow(
-                  item: link.items[i],
-                  accent: accent,
-                  onRemove: () => onRemoveItem(i),
-                ),
-                const SizedBox(height: 8),
-              ],
-            ],
           ),
-        const SizedBox(height: 4),
-        _PickerRow(
-          icon: LucideIcons.plus,
-          label: busy ? 'Adding…' : 'Add food',
-          accent: accent,
-          trailing: busy
-              ? SizedBox(
-                  width: 16,
-                  height: 16,
-                  child:
-                      CircularProgressIndicator(strokeWidth: 2, color: accent),
-                )
-              : null,
-          onTap: busy ? () {} : onAddItem,
-        ),
-        if (link.items.isNotEmpty) ...[
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Text('Total', style: t.bodyStrong),
-              const Spacer(),
-              Text(
-                '${link.totalKcal.round()} kcal',
-                style: AppType.numMd.copyWith(color: accent, fontSize: 14),
+        ] else ...[
+          const SizedBox(height: 16),
+          _Label('Foods'),
+          const SizedBox(height: 8),
+          if (link.items.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: c.surfaceElevated,
+                borderRadius: BorderRadius.circular(AppRadii.card),
+                border: Border.all(color: c.border, width: 0.5),
               ),
-            ],
+              child: Text(
+                'Add the foods this task logs — each with the quantity you take.',
+                style: t.body.copyWith(color: c.textMuted),
+              ),
+            )
+          else
+            Column(
+              children: [
+                for (var i = 0; i < link.items.length; i++) ...[
+                  _FoodLinkItemRow(
+                    item: link.items[i],
+                    accent: accent,
+                    onRemove: () => onRemoveItem(i),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+              ],
+            ),
+          const SizedBox(height: 4),
+          _PickerRow(
+            icon: LucideIcons.search,
+            label: busy ? 'Adding…' : 'Search food',
+            accent: accent,
+            trailing: busy
+                ? SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: accent),
+                  )
+                : null,
+            onTap: busy ? () {} : onAddItem,
           ),
+          const SizedBox(height: 8),
+          _PickerRow(
+            icon: LucideIcons.pencil,
+            label: 'Enter manually',
+            accent: accent,
+            trailing: const SizedBox.shrink(),
+            onTap: busy ? () {} : onAddManualItem,
+          ),
+          if (link.items.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Text('Total', style: t.bodyStrong),
+                const Spacer(),
+                Text(
+                  '${link.totalKcal.round()} kcal',
+                  style: AppType.numMd.copyWith(color: accent, fontSize: 14),
+                ),
+              ],
+            ),
+          ],
         ],
       ],
+    );
+  }
+}
+
+/// Small sheet for adding a `HabitFoodLinkItem` without a food-database
+/// lookup — just a name + calories (+ optional macros), for foods you know
+/// the numbers for by heart (a homemade shake, a usual portion) and don't
+/// want to search for. Mirrors QuickAddSheet's field style/validation.
+class _ManualFoodEntrySheet extends StatefulWidget {
+  const _ManualFoodEntrySheet();
+
+  @override
+  State<_ManualFoodEntrySheet> createState() => _ManualFoodEntrySheetState();
+}
+
+class _ManualFoodEntrySheetState extends State<_ManualFoodEntrySheet> {
+  final _name = TextEditingController(text: 'Food');
+  final _kcal = TextEditingController();
+  final _protein = TextEditingController();
+  final _carbs = TextEditingController();
+  final _fat = TextEditingController();
+
+  @override
+  void dispose() {
+    _name.dispose();
+    _kcal.dispose();
+    _protein.dispose();
+    _carbs.dispose();
+    _fat.dispose();
+    super.dispose();
+  }
+
+  double _val(TextEditingController c) {
+    final v = double.tryParse(c.text) ?? 0.0;
+    return v < 0 ? 0.0 : v;
+  }
+
+  void _save() {
+    final kcal = _val(_kcal);
+    if (kcal <= 0) return;
+    Navigator.of(context).pop(
+      HabitFoodLinkItem(
+        foodId: null,
+        name: _name.text.trim().isEmpty ? 'Food' : _name.text.trim(),
+        qty: 1,
+        unit: 'serving',
+        totals: Nutrients(
+          kcal: kcal,
+          proteinG: _val(_protein),
+          carbsG: _val(_carbs),
+          fatG: _val(_fat),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.c;
+    final t = context.t;
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
+        decoration: BoxDecoration(
+          color: c.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: c.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            Text('Enter manually', style: t.h2),
+            const SizedBox(height: 16),
+            _Label('Name'),
+            const SizedBox(height: 6),
+            _BentoField(controller: _name, hint: 'e.g. Milkshake'),
+            const SizedBox(height: 14),
+            _Label('Calories'),
+            const SizedBox(height: 6),
+            _BentoField(controller: _kcal, hint: 'kcal', keyboard: TextInputType.number),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _Label('Protein'),
+                      const SizedBox(height: 6),
+                      _BentoField(controller: _protein, hint: 'g', keyboard: TextInputType.number),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _Label('Carbs'),
+                      const SizedBox(height: 6),
+                      _BentoField(controller: _carbs, hint: 'g', keyboard: TextInputType.number),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _Label('Fat'),
+                      const SizedBox(height: 6),
+                      _BentoField(controller: _fat, hint: 'g', keyboard: TextInputType.number),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            AtlasButton(label: 'Add', onPressed: _save),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -14,6 +14,8 @@ import '../../food/providers/food_providers.dart';
 import '../../food/providers/food_sub_tab_provider.dart';
 import '../../food/scoring/nutrition_score.dart';
 import '../../habits/providers/habit_provider.dart';
+import '../../habits/widgets/meal_completion_gate.dart';
+import '../../../shared/providers/today_provider.dart';
 import '../../journal/widgets/wellness_check_in_card.dart';
 import '../../notifications/reminder_feed_provider.dart';
 import '../../xp/leveling_providers.dart';
@@ -78,14 +80,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final date = ref.read(selectedDateProvider);
     final key =
         '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
-    await ref
-        .read(habitActionsProvider.notifier)
-        .toggleHabit(
-          t.id,
-          key,
-          completed: !t.done,
-          actualValue: t.isNumeric ? (t.done ? 0.0 : t.target) : null,
-        );
+    await completeHabitGated(
+      context,
+      ref,
+      t.id,
+      key,
+      habit: t.habitRef,
+      wasCompleted: t.done,
+      completed: !t.done,
+      actualValue: t.isNumeric ? (t.done ? 0.0 : t.target) : null,
+    );
   }
 
   @override

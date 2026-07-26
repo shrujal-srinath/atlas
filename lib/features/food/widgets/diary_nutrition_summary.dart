@@ -3,8 +3,13 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../../core/theme/app_theme.dart';
+import '../../../shared/models/models.dart';
+import '../../../shared/providers/today_provider.dart';
 import '../../../shared/widgets/atlas_controls.dart';
+import '../../../shared/widgets/pressable_scale.dart';
+import '../../habits/widgets/meal_completion_gate.dart';
 import '../domain/food.dart';
+import '../domain/meal_entry.dart'; // MealTimeSlotX.label
 import '../domain/targets.dart';
 import '../food_colors.dart';
 import '../providers/food_providers.dart';
@@ -66,6 +71,7 @@ class _DiaryNutritionSummaryState extends ConsumerState<DiaryNutritionSummary> {
     final score = ref.watch(dayHealthScoreProvider);
     final water = ref.watch(waterIntakeProvider).valueOrNull ?? 0;
     final waterTarget = ref.watch(waterTargetProvider);
+    final pendingMeals = ref.watch(pendingMealHabitsProvider);
 
     final remaining = (targets.kcal - totals.kcal).round();
     final over = remaining < 0;
@@ -156,6 +162,9 @@ class _DiaryNutritionSummaryState extends ConsumerState<DiaryNutritionSummary> {
             sizeCurve: Curves.easeOutCubic,
           ),
 
+          if (_expanded && pendingMeals.isNotEmpty)
+            _PendingMealsSection(habits: pendingMeals),
+
           // ── 3. Water + log actions, pinned at the end ────────────
           Divider(
               height: 1, thickness: 0.5, color: c.border, indent: 12, endIndent: 12),
@@ -204,6 +213,84 @@ class _DiaryNutritionSummaryState extends ConsumerState<DiaryNutritionSummary> {
       buf.write(s[i]);
     }
     return buf.toString();
+  }
+}
+
+/// Today's Flexible meal habits marked done with no calories logged yet —
+/// each tappable into the same enter-calories/log-food choice the
+/// completion gate showed, without re-completing the (already-done) habit.
+class _PendingMealsSection extends ConsumerWidget {
+  final List<Habit> habits;
+  const _PendingMealsSection({required this.habits});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.c;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: c.surfaceElevated,
+          borderRadius: BorderRadius.circular(AppRadii.card),
+          border: Border.all(color: c.amber.withValues(alpha: 0.4)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(LucideIcons.flame, size: 13, color: c.amber),
+                const SizedBox(width: 6),
+                Text(
+                  'NEEDS CALORIES',
+                  style: AppType.overline
+                      .copyWith(color: c.textSecondary, letterSpacing: 1.0),
+                ),
+              ],
+            ),
+            for (final h in habits) ...[
+              const SizedBox(height: 8),
+              _PendingMealRow(habit: h),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PendingMealRow extends ConsumerWidget {
+  final Habit habit;
+  const _PendingMealRow({required this.habit});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.c;
+    final slot = flexibleMealSlotOf(habit);
+    if (slot == null) return const SizedBox.shrink();
+    return PressableScale(
+      onTap: () => showMealResolveSheet(
+        context,
+        ref,
+        habit: habit,
+        slot: slot,
+        date: ref.read(todayDateProvider),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              '${habit.name} · ${slot.label}',
+              style: context.t.body.copyWith(color: c.textPrimary),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Icon(LucideIcons.chevronRight, size: 15, color: c.textMuted),
+        ],
+      ),
+    );
   }
 }
 

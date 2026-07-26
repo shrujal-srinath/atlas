@@ -760,15 +760,22 @@ class _FoodLinkCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(LucideIcons.utensils, size: 14, color: accent),
+              Icon(
+                link.isFlexible ? LucideIcons.shuffle : LucideIcons.utensils,
+                size: 14,
+                color: accent,
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Auto-logs to ${link.slot.label}',
+                  link.isFlexible
+                      ? 'Flexible meal · logs to ${link.slot.label}'
+                      : 'Auto-logs to ${link.slot.label}',
                   style: t.body.copyWith(color: c.textSecondary),
                 ),
               ),
-              Text('${link.totalKcal.round()} kcal', style: t.bodyStrong),
+              if (!link.isFlexible)
+                Text('${link.totalKcal.round()} kcal', style: t.bodyStrong),
             ],
           ),
           for (final item in link.items) ...[
