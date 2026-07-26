@@ -44,6 +44,31 @@ class OfflineWriter {
     return {...payload, 'id': id};
   }
 
+  /// Like [insert] but conflict-target-aware — for tables where the
+  /// idempotent retry key isn't the row's primary key (e.g. habit_logs
+  /// conflicts on `habit_id,date`, not `id`; see toggleHabit/setRestDay).
+  static Future<void> upsert({
+    required String table,
+    required Map<String, dynamic> payload,
+    required String onConflict,
+  }) async {
+    final online = await SyncQueue.instance.isOnline();
+    if (online) {
+      try {
+        await SupabaseService.client
+            .from(table)
+            .upsert(payload, onConflict: onConflict);
+        return;
+      } catch (e, s) {
+        if (kDebugMode) {
+          debugPrint('OfflineWriter.upsert "$table" fell through to queue: $e\n$s');
+        }
+      }
+    }
+    await SyncQueue.instance
+        .enqueueUpsert(table: table, payload: payload, onConflict: onConflict);
+  }
+
   static Future<void> delete({
     required String table,
     required String id,

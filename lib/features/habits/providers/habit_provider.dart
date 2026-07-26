@@ -1,7 +1,11 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/models/models.dart';
+import '../../../shared/services/hive_service.dart';
+import '../../../shared/services/offline_writer.dart';
 import '../../../shared/services/supabase_service.dart';
+import '../../../shared/services/sync_queue.dart';
 import '../../../core/dev/dev_mode.dart';
 import '../../auth/providers/auth_provider.dart';
 import '../../food/providers/food_providers.dart';
@@ -59,6 +63,12 @@ final allHabitsProvider = FutureProvider<List<Habit>>((ref) async {
   return (data as List).map((e) => Habit.fromJson(e)).toList();
 });
 
+/// Read-through the `habit_logs_cache` Hive box + the pending `SyncQueue`
+/// (HABITS_AUDIT §3.7, same pattern as food_repository.dart's SR-1 fix): a
+/// fetch failure (offline) falls back to the last-good cached rows instead
+/// of throwing, and any not-yet-synced upsert for [date] is merged in either
+/// way, so toggling a habit offline is reflected immediately instead of
+/// waiting for the queue to drain.
 final habitLogsForDateProvider = FutureProvider.family<List<HabitLog>, String>((
   ref,
   date,
@@ -69,15 +79,26 @@ final habitLogsForDateProvider = FutureProvider.family<List<HabitLog>, String>((
   }
   final session = ref.watch(sessionProvider);
   if (session == null) return [];
-  final data = await SupabaseService.client
-      .from('habit_logs')
-      .select()
-      .eq('user_id', session.user.id)
-      .eq('date', date);
-  return (data as List).map((e) => HabitLog.fromJson(e)).toList();
+  final cacheKey = 'byDate:$date';
+  List<Map<String, dynamic>> rows;
+  try {
+    final data = await SupabaseService.client
+        .from('habit_logs')
+        .select()
+        .eq('user_id', session.user.id)
+        .eq('date', date);
+    rows = (data as List).cast<Map<String, dynamic>>();
+    unawaited(HiveService.put(HiveService.habitLogsBox, cacheKey, rows));
+  } catch (_) {
+    rows = _readCachedHabitLogs(cacheKey);
+  }
+  final merged = _mergePendingHabitLogOps(rows, date: date);
+  return merged.map((e) => HabitLog.fromJson(e)).toList();
 });
 
-/// Last 60 days of completed logs — used for streak calculation across all habits.
+/// Last 60 days of completed logs — used for streak calculation across all
+/// habits. Same read-through treatment as [habitLogsForDateProvider], cached
+/// as one blob (a 60-day range doesn't map to a single `byDate` key).
 final recentHabitLogsProvider = FutureProvider<List<HabitLog>>((ref) async {
   if (ref.watch(devModeProvider)) {
     return _withDevOverrides(ref, generateMockLogs());
@@ -87,13 +108,63 @@ final recentHabitLogsProvider = FutureProvider<List<HabitLog>>((ref) async {
   final since = DateTime.now().subtract(const Duration(days: 60));
   final sinceStr =
       '${since.year}-${since.month.toString().padLeft(2, '0')}-${since.day.toString().padLeft(2, '0')}';
-  final data = await SupabaseService.client
-      .from('habit_logs')
-      .select()
-      .eq('user_id', session.user.id)
-      .gte('date', sinceStr);
-  return (data as List).map((e) => HabitLog.fromJson(e)).toList();
+  const cacheKey = 'recent60';
+  List<Map<String, dynamic>> rows;
+  try {
+    final data = await SupabaseService.client
+        .from('habit_logs')
+        .select()
+        .eq('user_id', session.user.id)
+        .gte('date', sinceStr);
+    rows = (data as List).cast<Map<String, dynamic>>();
+    unawaited(HiveService.put(HiveService.habitLogsBox, cacheKey, rows));
+  } catch (_) {
+    rows = _readCachedHabitLogs(cacheKey);
+  }
+  final merged = _mergePendingHabitLogOps(rows);
+  return merged.map((e) => HabitLog.fromJson(e)).toList();
 });
+
+List<Map<String, dynamic>> _readCachedHabitLogs(String cacheKey) {
+  final cached = HiveService.get<List>(HiveService.habitLogsBox, cacheKey);
+  if (cached == null) return const [];
+  return cached.cast<Map>().map((m) => Map<String, dynamic>.from(m)).toList();
+}
+
+/// Overlays pending `habit_logs` [SyncQueue] ops onto [base] rows — unsynced
+/// upserts appear/patch in place, unsynced deletes are hidden — whether
+/// [base] came from a live fetch or the cache. Keyed by `habit_id|date`
+/// (the natural identity for a habit log) rather than row `id`, since a
+/// queued upsert doesn't carry a client-generated id (see toggleHabit).
+/// [date] narrows the merge to one day; omit it for a multi-day range.
+List<Map<String, dynamic>> _mergePendingHabitLogOps(
+  List<Map<String, dynamic>> base, {
+  String? date,
+}) {
+  final ops = SyncQueue.instance.pendingOpsFor('habit_logs');
+  if (ops.isEmpty) return base;
+  String keyOf(Map<String, dynamic> r) => '${r['habit_id']}|${r['date']}';
+  final byKey = {for (final r in base) keyOf(r): r};
+  for (final op in ops) {
+    switch (op.op) {
+      case 'upsert':
+      case 'insert':
+        if (date == null || op.payload['date'] == date) {
+          final key = keyOf(op.payload);
+          byKey[key] = {...?byKey[key], ...op.payload};
+        }
+      case 'update':
+        final id = op.matchId;
+        final existing = byKey.values.where((r) => r['id'] == id).firstOrNull;
+        if (existing != null) {
+          byKey[keyOf(existing)] = {...existing, ...op.payload};
+        }
+      case 'delete':
+        byKey.removeWhere((_, r) => r['id'] == op.matchId);
+    }
+  }
+  return byKey.values.toList();
+}
 
 /// All habit logs over the last [days] days in ONE query — powers the stats
 /// score series. Lets the dashboard compute a 30/90-day trend locally instead
@@ -312,12 +383,25 @@ class HabitActionsNotifier extends StateNotifier<AsyncValue<void>> {
     final session = _ref.read(sessionProvider);
     if (session == null) return;
 
-    final existing = await SupabaseService.client
-        .from('habit_logs')
-        .select()
-        .eq('habit_id', habitId)
-        .eq('date', date)
-        .maybeSingle();
+    // HABITS_AUDIT §3.7: this read used to throw outright when offline,
+    // losing the completion entirely before the write was even attempted.
+    // Fall back to the last-good cache + pending queue ops for this date so
+    // a toggle offline still knows the current state to invert.
+    Map<String, dynamic>? existing;
+    try {
+      existing = await SupabaseService.client
+          .from('habit_logs')
+          .select()
+          .eq('habit_id', habitId)
+          .eq('date', date)
+          .maybeSingle();
+    } catch (_) {
+      final cached = _mergePendingHabitLogOps(
+        _readCachedHabitLogs('byDate:$date'),
+        date: date,
+      );
+      existing = cached.where((r) => r['habit_id'] == habitId).firstOrNull;
+    }
 
     final isCompleted =
         completed ??
@@ -343,10 +427,14 @@ class HabitActionsNotifier extends StateNotifier<AsyncValue<void>> {
     // devices) can both see "no existing row" and both take the insert
     // branch, leaving duplicate log rows that all future reads then have to
     // reconcile with `.any()`. An upsert is atomic at the DB level
-    // regardless of what either caller read beforehand.
-    await SupabaseService.client
-        .from('habit_logs')
-        .upsert(payload, onConflict: 'habit_id,date');
+    // regardless of what either caller read beforehand. Routed through
+    // OfflineWriter (§3.7) so a failed/offline write queues instead of
+    // throwing — toggleHabit is the app's highest-frequency write.
+    await OfflineWriter.upsert(
+      table: 'habit_logs',
+      payload: payload,
+      onConflict: 'habit_id,date',
+    );
 
     // Auto-log / un-log any linked food for this task on this date.
     await _syncFoodLink(habitId: habitId, date: date, completed: isCompleted);
@@ -414,10 +502,13 @@ class HabitActionsNotifier extends StateNotifier<AsyncValue<void>> {
       'actual_value': null,
     };
 
-    // Atomic upsert (SR-6) — see the comment in toggleHabit above.
-    await SupabaseService.client
-        .from('habit_logs')
-        .upsert(payload, onConflict: 'habit_id,date');
+    // Atomic upsert (SR-6), offline-queued if it fails (§3.7) — see the
+    // comment in toggleHabit above.
+    await OfflineWriter.upsert(
+      table: 'habit_logs',
+      payload: payload,
+      onConflict: 'habit_id,date',
+    );
 
     // A rest is not a completion — drop any auto-logged food for the day.
     await _syncFoodLink(habitId: habitId, date: date, completed: false);

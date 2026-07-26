@@ -10,12 +10,15 @@ import 'supabase_service.dart';
 /// One pending mutation in the queue.
 class SyncOp {
   final String id;
-  final String op;        // 'insert' | 'update' | 'delete'
+  final String op;        // 'insert' | 'update' | 'delete' | 'upsert'
   final String table;     // supabase table name
   final Map<String, dynamic> payload;
   /// Used for update/delete. For inserts that pre-generate UUIDs, the payload
   /// already carries `id`; this stays null for those.
   final String? matchId;
+  /// Used for 'upsert' ops whose conflict target isn't the primary key (e.g.
+  /// habit_logs conflicts on `habit_id,date` — see toggleHabit).
+  final String? onConflict;
   final int ts;           // millis since epoch when enqueued
   final int retries;
 
@@ -25,6 +28,7 @@ class SyncOp {
     required this.table,
     required this.payload,
     this.matchId,
+    this.onConflict,
     required this.ts,
     this.retries = 0,
   });
@@ -35,6 +39,7 @@ class SyncOp {
         'table': table,
         'payload': payload,
         if (matchId != null) 'matchId': matchId,
+        if (onConflict != null) 'onConflict': onConflict,
         'ts': ts,
         'retries': retries,
       };
@@ -45,6 +50,7 @@ class SyncOp {
         table: m['table'] as String,
         payload: Map<String, dynamic>.from(m['payload'] as Map),
         matchId: m['matchId'] as String?,
+        onConflict: m['onConflict'] as String?,
         ts: (m['ts'] as num).toInt(),
         retries: (m['retries'] as num?)?.toInt() ?? 0,
       );
@@ -55,6 +61,7 @@ class SyncOp {
         table: table,
         payload: payload,
         matchId: matchId,
+        onConflict: onConflict,
         ts: ts,
         retries: retries + 1,
       );
@@ -164,6 +171,27 @@ class SyncQueue extends ChangeNotifier {
     await _writeAll(all);
   }
 
+  /// Enqueue an upsert keyed on [onConflict] (e.g. `'habit_id,date'`) rather
+  /// than the row's primary key — needed when the natural identity for
+  /// retry-idempotency isn't a client-generated id (see toggleHabit/
+  /// setRestDay, HABITS_AUDIT §3.7).
+  Future<void> enqueueUpsert({
+    required String table,
+    required Map<String, dynamic> payload,
+    required String onConflict,
+  }) async {
+    final op = SyncOp(
+      id: _uuid.v4(),
+      op: 'upsert',
+      table: table,
+      payload: payload,
+      onConflict: onConflict,
+      ts: DateTime.now().millisecondsSinceEpoch,
+    );
+    final all = _readAll()..add(op);
+    await _writeAll(all);
+  }
+
   Future<void> enqueueDelete({
     required String table,
     required String id,
@@ -258,6 +286,9 @@ class SyncQueue extends ChangeNotifier {
       case 'insert':
         // Upsert so re-runs are safe — the client-generated id is the unique key.
         await client.from(op.table).upsert(op.payload);
+        return;
+      case 'upsert':
+        await client.from(op.table).upsert(op.payload, onConflict: op.onConflict);
         return;
       case 'update':
         if (op.matchId == null) return;
