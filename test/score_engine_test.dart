@@ -194,35 +194,4 @@ void main() {
     });
   });
 
-  group('normalizeSectionWeights', () {
-    test('null falls back to defaults', () {
-      expect(normalizeSectionWeights(null), kDefaultSectionWeights);
-    });
-
-    test('empty falls back to defaults', () {
-      expect(normalizeSectionWeights(const {}), kDefaultSectionWeights);
-    });
-
-    test('40/30/30 yields 0.4/0.3/0.3', () {
-      final w = normalizeSectionWeights(
-          const {'athletic': 40, 'mind': 30, 'body': 30});
-      expect(w[HabitSection.athletic], closeTo(0.4, 1e-9));
-      expect(w[HabitSection.mind], closeTo(0.3, 1e-9));
-      expect(w[HabitSection.body], closeTo(0.3, 1e-9));
-    });
-
-    test('sum > 100 (50/30/30 = 110) normalizes correctly', () {
-      final w = normalizeSectionWeights(
-          const {'athletic': 50, 'mind': 30, 'body': 30});
-      final sum = w.values.fold<double>(0, (a, b) => a + b);
-      expect(sum, closeTo(1.0, 1e-9));
-    });
-
-    test('all-zero falls back to defaults', () {
-      expect(
-        normalizeSectionWeights(const {'athletic': 0, 'mind': 0, 'body': 0}),
-        kDefaultSectionWeights,
-      );
-    });
-  });
 }

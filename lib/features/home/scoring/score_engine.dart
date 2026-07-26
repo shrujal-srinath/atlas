@@ -222,24 +222,6 @@ const Map<HabitSection, double> kDefaultSectionWeights = {
   HabitSection.body: 0.3,
 };
 
-/// Normalizes a raw Supabase map (e.g. `{athletic: 40, mind: 30, body: 30}`)
-/// into fractions that sum to 1.0. Falls back to [kDefaultSectionWeights] if
-/// the input is null, empty, or sums to zero.
-Map<HabitSection, double> normalizeSectionWeights(Map<String, dynamic>? raw) {
-  if (raw == null || raw.isEmpty) return kDefaultSectionWeights;
-  double pick(String k, double dflt) => (raw[k] as num?)?.toDouble() ?? dflt;
-  final a = pick('athletic', 0);
-  final m = pick('mind', 0);
-  final b = pick('body', 0);
-  final sum = a + m + b;
-  if (sum <= 0) return kDefaultSectionWeights;
-  return {
-    HabitSection.athletic: a / sum,
-    HabitSection.mind: m / sum,
-    HabitSection.body: b / sum,
-  };
-}
-
 // ════════════════════════════════════════════════════════════════════
 // Full day score (habits + nutrition blend)
 // ════════════════════════════════════════════════════════════════════
